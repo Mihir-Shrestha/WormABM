@@ -17,10 +17,14 @@ class Keeper(object):
             "t"     : [],
             "worm_i" : [],
             "x"     : [],
-            "y"     : [], 
+            "y"     : [],
+            "state" : [], 
             "angle" : [],
             "timestep" : [],
         }
+
+        states = ["run", "tumble"]
+        self.state_encoding = { state : i for i, state in enumerate(states) }
 
     def __update_worm_history(self, worm_info):
         for key, val in worm_info.items():
@@ -38,11 +42,15 @@ class Keeper(object):
 
     def measure_worms(self, worm, global_i):
         """Record worm state at current timestep"""
+        if self.sleeping:
+            return
+
         worm_info = {
             "t"      : global_i,
             "worm_i" : worm.num,
             "x"      : worm.x,
             "y"      : worm.y,
+            "state"  : self.state_encoding[worm.state],
             "angle"  : worm.angle,
             "timestep": worm.timestep,
         }

@@ -20,6 +20,21 @@ class Worm(object):
         # Initialize worm state variables
         self.angle = np.random.uniform(0, 2 * np.pi) # Random initial angle
         self.timestep = 0
+
+        # Run and tumble state
+        self.state = 'run'
+        self.state_timer = 0
+        self.run_duration = self.__sample_run_duration()
+        self.tumble_duration = self.__sample_tumble_duration()
+    
+    def __sample_run_duration(self):
+        # Sample run duration from exponential distribution
+        # Adjust rate parameter (1/mean) as needed
+        return np.random.exponential(self.worm_mean_run_duration)
+    
+    def __sample_tumble_duration(self):
+        # Sample tumble duration from exponential distribution
+        return np.random.exponential(self.worm_mean_tumble_duration)
     
     def __check_arena_boundary(self, environment, coord):
         # Check if coordinate is within bounds
@@ -27,9 +42,14 @@ class Worm(object):
     
     def __update_movement(self, environment):
         # Update worm position based on current angle and speed
-        # Calculate intended new position
-        next_x = self.x + self.worm_step_size * np.cos(self.angle)
-        next_y = self.y + self.worm_step_size * np.sin(self.angle)
+        if self.state == "run":
+            # Continue in current direction
+            next_x = self.x + self.worm_step_size * np.cos(self.angle)
+            next_y = self.y + self.worm_step_size * np.sin(self.angle)
+        else:  # tumble
+            # Stay in place during tumble
+            next_x = self.x
+            next_y = self.y
 
         # Check arena boundaries
         move_in_x = self.__check_arena_boundary(environment, next_x)
@@ -44,16 +64,36 @@ class Worm(object):
         self.y = next_y
 
     def __update_angle(self):
-        # Update heading with random turn noise
-        # Add Gausian noise to current angle
-        angle_change = np.random.normal(0, self.worm_turn_noise)
-        self.angle += angle_change
-
+        # Update heading based on state
+        if self.state == "run":
+            # Small noise during run to maintain roughly straight path
+            angle_change = np.random.normal(0, self.worm_turn_noise)
+            self.angle += angle_change
+        else:  # tumble
+            # Large random turn during tumble
+            self.angle = np.random.uniform(0, 2 * np.pi)
+        
         # Normalize angle to [0, 2pi]
         self.angle = self.angle % (2 * np.pi)
+
+    def __update_state(self):
+        # Update state timer and switch state if duration elapsed
+        self.state_timer += 1
+        
+        if self.state == "run":
+            if self.state_timer >= self.run_duration:
+                self.state = "tumble"
+                self.state_timer = 0
+                self.tumble_duration = self.__sample_tumble_duration()
+        else:  # tumble
+            if self.state_timer >= self.tumble_duration:
+                self.state = "run"
+                self.state_timer = 0
+                self.run_duration = self.__sample_run_duration()
 
     def step(self, environment):
         # Single time step update, update angle and move
         self.__update_angle()
         self.__update_movement(environment)
+        self.__update_state()
         self.timestep += 1

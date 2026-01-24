@@ -1,5 +1,6 @@
 config_opts = {
     # Simulation parameters
+    "verbose"     : True,
     "random_seed" : 42,
 
     # Environment parameters
@@ -13,7 +14,9 @@ config_opts = {
     # Worm parameters
     "num_worms" : 1,
     "worm_step_size" : 0.1,
-    "worm_turn_noise" : 0.9,
+    "worm_turn_noise" : 0.2,
+    "worm_mean_run_duration" : 3,
+    "worm_mean_tumble_duration" : 2,
 
     # Other parameters
     "measurements_on" : True

@@ -35,7 +35,9 @@ def config_options():
     # Worm parameters
     parser.add_argument("--num_worms", type=int, default=1)
     parser.add_argument("--worm_step_size", type=float, default=0.1)
-    parser.add_argument("--worm_turn_noise", type=float, default=0.25)
+    parser.add_argument("--worm_turn_noise", type=float, default=0.2)
+    parser.add_argument("--worm_mean_run_duration", type=float, default=3)
+    parser.add_argument("--worm_mean_tumble_duration", type=float, default=2)
 
     # Config file
     parser.add_argument("--file", type=open, action=LoadFromFile)
@@ -92,6 +94,8 @@ def world_parameters(cfg, model_dir):
     worm_params = {
         "worm_step_size": cfg.worm_step_size,
         "worm_turn_noise": cfg.worm_turn_noise,
+        "worm_mean_run_duration": cfg.worm_mean_run_duration,
+        "worm_mean_tumble_duration": cfg.worm_mean_tumble_duration,
     }
 
     world_params = {
@@ -181,10 +185,8 @@ def world_objects(cfg_options, world_params):
     # Calculate grid dimension
     dim = len(np.arange(cfg_options.x_min, cfg_options.x_max, cfg_options.dx)) + 1
 
-    # Create environment
+    # Create environment and keeper objects
     environment = Environment.Environment(world_params["environment"])
-    
-    # Create keeper
     keeper = Keeper.Keeper(world_params["keeper"])
 
     # Create worm(s)
