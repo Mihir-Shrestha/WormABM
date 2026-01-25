@@ -20,6 +20,9 @@ def main(cfg_options, environment, worms, keeper):
 
                 # Measure and store worm info
                 keeper.measure_worms(worm, global_i)
+
+            # Store environment info after all worms have moved
+            keeper.measure_environment(environment)
         
         # Save data to h5 files
         keeper.log_data_to_handy_dandy_notebook()

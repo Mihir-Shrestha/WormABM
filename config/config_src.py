@@ -17,9 +17,12 @@ config_opts = {
     "worm_turn_noise" : 0.2,
     "worm_mean_run_duration" : 3,
     "worm_mean_tumble_duration" : 2,
+    "bacteria_enabled" : True,
+    "bacteria_drop_interval" : 5,
+    "bacteria_amount" : 1.0,
 
     # Other parameters
-    "measurements_on" : True
+    "measurements_on" : True,
 }
 
 

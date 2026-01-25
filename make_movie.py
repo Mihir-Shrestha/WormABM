@@ -55,7 +55,13 @@ def imgs2vid(imgs, outpath, fps=15):
     cv2.destroyAllWindows()
     video.release()
 
-def process_data(worm_path):
+def process_data(env_path, worm_path):
+    # Load bacteria time series (3D array)
+    bacteria_history = []
+    with h5py.File(env_path, 'r') as infile:
+        if 'bacteria' in infile:
+            bacteria_history = np.array(infile['bacteria'])
+
     # Get worm measurements
     worm_data = {}
     with h5py.File(worm_path, 'r') as infile:
@@ -69,9 +75,16 @@ def process_data(worm_path):
         worm_y = worm_data['y'][idxs]
         worms[worm_num] = {"x" : worm_x, "y" : worm_y,}
 
-    return worms
+    return worms, bacteria_history
 
-def plot_frame(frame_i, worms, legend_colors, texts, script_config, convert_xy_to_index, total_frames):
+def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_config, convert_xy_to_index, total_frames):
+    # Plot bacteria dropped up to current frame
+    if len(bacteria_history) > frame_i:
+        bacteria_grid = bacteria_history[frame_i]
+        # Get indices where bacteria exists
+        y_indices, x_indices = np.where(bacteria_grid > 0)
+        if len(x_indices) > 0:
+            plt.scatter(x_indices, y_indices, color='green', s=20, alpha=0.6, marker='o')
 
     # Process worm data
     for worm_key, worm_vals in worms.items():
@@ -123,20 +136,21 @@ def main(exp_path, fps, stepsize):
 
     # Get data path
     worm_path = os.path.join(exp_path, "worm_hist.h5")
+    env_path = os.path.join(exp_path, "environment_hist.h5")
 
     # Obtain & process data
-    worms = process_data(worm_path)
+    worms, bacteria_sources = process_data(env_path, worm_path)
 
     # Setup for plotting
     total_frames = len(list(worms.values())[0]['x'])
-    texts = ['Worm']
-    legend_colors = ['Gray']
+    texts = ['Worm', 'Bacteria']
+    legend_colors = ['Gray', 'Green']
 
     for frame_i in range(0, total_frames, stepsize):
             sys.stdout.write(f"\rMaking frame {frame_i+1}/{total_frames}")
             sys.stdout.flush()
 
-            plot_frame(frame_i, worms, legend_colors, texts, script_config, convert_xy_to_index, total_frames)
+            plot_frame(frame_i, worms, bacteria_sources, legend_colors, texts, script_config, convert_xy_to_index, total_frames)
     
     # Stitching frames together to create video
     all_img_paths = np.sort(glob2.glob(f"{MOVIE_FRAME_PATH}/*.png"))

@@ -26,16 +26,21 @@ class Worm(object):
         self.state_timer = 0
         self.run_duration = self.__sample_run_duration()
         self.tumble_duration = self.__sample_tumble_duration()
-    
+
+        # Bacteria drop (fixed interval)
+        self.bacteria_enabled = self.bacteria_enabled
+        self.bacteria_drop_interval = self.bacteria_drop_interval
+        self.bacteria_amount = self.bacteria_amount
+        self.next_drop_timestep = 0
+
     def __sample_run_duration(self):
         # Sample run duration from exponential distribution
         # Adjust rate parameter (1/mean) as needed
         return np.random.exponential(self.worm_mean_run_duration)
     
     def __sample_tumble_duration(self):
-        # Sample tumble duration from exponential distribution
         return np.random.exponential(self.worm_mean_tumble_duration)
-    
+        
     def __check_arena_boundary(self, environment, coord):
         # Check if coordinate is within bounds
         return environment.x_min < coord < environment.x_max
@@ -44,6 +49,7 @@ class Worm(object):
         # Update worm position based on current angle and speed
         if self.state == "run":
             # Continue in current direction
+        # Sample tumble duration from exponential distribution
             next_x = self.x + self.worm_step_size * np.cos(self.angle)
             next_y = self.y + self.worm_step_size * np.sin(self.angle)
         else:  # tumble
@@ -91,9 +97,17 @@ class Worm(object):
                 self.state_timer = 0
                 self.run_duration = self.__sample_run_duration()
 
+    def __drop_bacteria(self, environment):
+        if not self.bacteria_enabled:
+            return
+        if self.timestep >= self.next_drop_timestep:
+            environment.add_bacteria_source(self.x, self.y, self.bacteria_amount)
+            self.next_drop_timestep += int(self.bacteria_drop_interval)
+
     def step(self, environment):
         # Single time step update, update angle and move
         self.__update_angle()
         self.__update_movement(environment)
         self.__update_state()
+        self.__drop_bacteria(environment)
         self.timestep += 1

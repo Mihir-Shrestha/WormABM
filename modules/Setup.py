@@ -38,6 +38,10 @@ def config_options():
     parser.add_argument("--worm_turn_noise", type=float, default=0.2)
     parser.add_argument("--worm_mean_run_duration", type=float, default=3)
     parser.add_argument("--worm_mean_tumble_duration", type=float, default=2)
+    # Bacteria drop parameters
+    parser.add_argument("--bacteria_enabled", type=bool, default=True)
+    parser.add_argument("--bacteria_drop_interval", type=int, default=5)
+    parser.add_argument("--bacteria_amount", type=float, default=1.0)
 
     # Config file
     parser.add_argument("--file", type=open, action=LoadFromFile)
@@ -78,7 +82,7 @@ def world_parameters(cfg, model_dir):
     # Organize parameters into dictionaries
     keeper_params = {
         "worm_path": os.path.join(model_dir, "worm_hist.h5"),
-        "environment_path": os.path.join(model_dir, "envir_hist.h5"),
+        "environment_path": os.path.join(model_dir, "environment_hist.h5"),
         "sleeping": not cfg.measurements_on,
     }
 
@@ -96,6 +100,9 @@ def world_parameters(cfg, model_dir):
         "worm_turn_noise": cfg.worm_turn_noise,
         "worm_mean_run_duration": cfg.worm_mean_run_duration,
         "worm_mean_tumble_duration": cfg.worm_mean_tumble_duration,
+        "bacteria_enabled": cfg.bacteria_enabled,
+        "bacteria_drop_interval": cfg.bacteria_drop_interval,
+        "bacteria_amount": cfg.bacteria_amount,
     }
 
     world_params = {

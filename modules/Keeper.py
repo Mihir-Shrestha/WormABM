@@ -5,7 +5,7 @@ class Keeper(object):
     def __init__(self, params):
         self.__set_params(params)
         self.__init_history()
-        self.environment_history = []
+        self.environment_history = []   # List of 2D grids
 
     def __set_params(self, params):
         for key, val in params.items():
@@ -30,16 +30,24 @@ class Keeper(object):
         for key, val in worm_info.items():
             self.worm_history[key].append(val)
 
+    def __write_environment_data(self):
+        """Save bacteria grid time series (3D: [time, height, width])"""
+        with h5py.File(self.environment_path, 'w') as outfile:
+            outfile.create_dataset("bacteria", data=self.environment_history)
+            
     def __write_worm_data(self):
         """Save worm history to HDF5 file"""
         with h5py.File(self.worm_path, 'w') as outfile:
             for key, val in self.worm_history.items():
                 outfile.create_dataset(key, data=val)
-    
-    # def __write_environment_data(self):
-    #     with h5py.File(self.environment_path, 'w') as outfile:
-    #         outfile.create_dataset("concentration", data=self.environment_history)
 
+    def measure_environment(self, environment):
+        """Record bacteria grid snapshot at current timestep"""
+        if self.sleeping:
+            return
+        self.environment_history.append(environment.bacteria_map.copy())
+
+    
     def measure_worms(self, worm, global_i):
         """Record worm state at current timestep"""
         if self.sleeping:
@@ -60,5 +68,5 @@ class Keeper(object):
         if self.sleeping:
             return
         
-        # self.__write_environment_data()
+        self.__write_environment_data()
         self.__write_worm_data()
