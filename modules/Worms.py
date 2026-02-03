@@ -13,8 +13,8 @@ class Worm(object):
     
     def __init_position(self):
         # Initialize worm position at origin
-        self.x = 0
-        self.y = 0
+        self.x = 0.0
+        self.y = 0.0
     
     def __init_conditions(self):
         # Initialize worm state variables

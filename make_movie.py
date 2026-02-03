@@ -77,14 +77,30 @@ def process_data(env_path, worm_path):
 
     return worms, bacteria_history
 
-def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_config, convert_xy_to_index, total_frames):
-    # Plot bacteria dropped up to current frame
+def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_config, convert_xy_to_index, total_frames):  
+    # Plot bacteria concentration map with gradient
     if len(bacteria_history) > frame_i:
         bacteria_grid = bacteria_history[frame_i]
-        # Get indices where bacteria exists
-        y_indices, x_indices = np.where(bacteria_grid > 0)
-        if len(x_indices) > 0:
-            plt.scatter(x_indices, y_indices, color='green', s=20, alpha=0.6, marker='o')
+        
+        # Get min/max for color scaling
+        min_b = np.min(bacteria_history)
+        max_b = np.max(bacteria_history) * 0.85
+        
+        # Display bacteria as heatmap 
+        im = plt.imshow(bacteria_grid, cmap='Greens', vmin=min_b, vmax=max_b, 
+                        origin='upper', alpha=0.8, interpolation='bilinear')
+        
+        # Add colorbar to show concentration scale
+        clb = plt.colorbar(im, shrink=0.8, format='%.2f')
+        clb.ax.set_title('Bacteria\nConc.')
+
+    # # Plot bacteria dropped up to current frame
+    # if len(bacteria_history) > frame_i:
+    #     bacteria_grid = bacteria_history[frame_i]
+    #     # Get indices where bacteria exists
+    #     y_indices, x_indices = np.where(bacteria_grid > 0)
+    #     if len(x_indices) > 0:
+    #         plt.scatter(x_indices, y_indices, color='green', s=20, alpha=0.6, marker='o')
 
     # Process worm data
     for worm_key, worm_vals in worms.items():
@@ -92,7 +108,7 @@ def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_co
         y = worm_vals['y'][frame_i]
         color = 'Gray'
         plt.scatter(convert_xy_to_index(x), convert_xy_to_index(y),
-                    color=color, s=100, edgecolors='black')
+                    color=color, s=100, edgecolors='black', zorder = 10)
 
     # Plot formatting
     patches = [ plt.plot([],[], marker="o", ms=10 if color_i==0 else 6, ls="", color=legend_colors[color_i],
@@ -102,9 +118,12 @@ def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_co
                fontsize='small', fancybox="True",
                handletextpad=0, columnspacing=0)
     plt.xlabel("X")
-    plt.ylabel("Y")
-    plt.xlim(0, 300)
-    plt.ylim(0, 300)
+    plt.ylabel("Y")    
+    
+    # Set axes to INDEX SPACE
+    GRID_SIZE = bacteria_grid.shape[0]
+    plt.xlim(0, GRID_SIZE)
+    plt.ylim(0, GRID_SIZE)
 
     # Title
     N = script_config['num_worms']
@@ -113,7 +132,7 @@ def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_co
     plt.title(f"{title} \n t: {frame_i+1}/{total_frames}")
 
     # Save frames
-    file_path = f't{frame_i+1:02d}.png'
+    file_path = f't{frame_i+1:03d}.png'
     filename = f'{MOVIE_FRAME_PATH}/{file_path}'
     plt.savefig(filename, bbox_inches='tight', dpi=150)
     plt.close()

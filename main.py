@@ -15,6 +15,9 @@ def main(cfg_options, environment, worms, keeper):
             if cfg_options.verbose:
                 print(f"\rTimestep: {global_i+1}/{environment.t_grid.shape[0]}")
 
+            # Initialize or update bacteria map
+            environment.update_bacteria_map()
+
             for worm in worms:
                 worm.step(environment)
 

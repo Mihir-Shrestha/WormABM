@@ -8,8 +8,8 @@ config_opts = {
     "x_max" : 1.5,
     "dx" : 0.01,
     "t_min" : 0,
-    "t_max" : 0.125,
-    "dt" : 0.005,
+    "t_max" : 0.0025,
+    "dt" : 0.000025,
 
     # Worm parameters
     "num_worms" : 1,
@@ -19,7 +19,7 @@ config_opts = {
     "worm_mean_tumble_duration" : 2,
     "bacteria_enabled" : True,
     "bacteria_drop_interval" : 5,
-    "bacteria_amount" : 1.0,
+    "bacteria_amount" : 1,
 
     # Other parameters
     "measurements_on" : True,

@@ -8,6 +8,9 @@ class Environment:
 
         # Bacteria concentration grid (like bee pheromone)
         self.bacteria_map = np.zeros_like(self.x_grid, dtype=float)
+        # self.bacteria_map = []
+        # self.__init_bacteria_map()
+        self.init_bacteria_patch(x_center=0.0, y_center=0.0, radius=0.1, amplitude=1)
 
     def __getitem__(self, idx):
         # Allow indexing: env[i] returns time at index i
@@ -30,12 +33,89 @@ class Environment:
         print("Creating timecourse...")
         self.t_grid = np.arange(self.t_min, self.t_max, self.dt)
 
+    # def __init_bacteria_map(self):
+    #     # Initialize bacteria concentration map to zeros
+    #     self.bacteria_map = np.zeros_like(self.x_grid, dtype=float)
+
+    def init_bacteria_patch(self, x_center, y_center, radius, amplitude):
+        """
+        Initialize a Gaussian patch of bacteria at (x_center, y_center)
+        Only sets bacteria within a certain radius, keeps rest at zero
+        """
+        dx = self.x_grid - x_center
+        dy = self.y_grid - y_center
+        dist_sq = dx**2 + dy**2
+        
+        # Create Gaussian
+        gaussian = amplitude * np.exp(-dist_sq / (2 * radius**2))
+        
+        # Only apply where distance < 3*radius (99.7% of distribution)
+        mask = np.sqrt(dist_sq) < (3 * radius)
+        self.bacteria_map[mask] = gaussian[mask]
+        # Everything outside the mask stays at 0
+
+    def update_bacteria_map(self):
+        """
+        Solve ∂b/∂t = ∇²b + b(1-b) using finite differences
+        """
+        # Compute Laplacian (diffusion term)
+        laplacian = self.__compute_laplacian(self.bacteria_map)
+        
+        # Compute logistic growth term with r=0.01
+        growth = self.bacteria_map * (1 - self.bacteria_map)
+        
+        # Forward Euler time step: b_new = b_old + dt * (∇²b + b(1-b))
+        self.bacteria_map += self.dt * (laplacian + growth)
+        
+        # Clamp to [0, 1] to avoid numerical instability
+        self.bacteria_map = np.clip(self.bacteria_map, 0, 1)
+
+    def __compute_laplacian(self, field):
+        """
+        Compute ∇²b using 9-point stencil (includes diagonals)
+        """
+        laplacian = np.zeros_like(field)
+        dx2 = self.dx ** 2
+        
+        # 9-point stencil: includes diagonal neighbors
+        laplacian[1:-1, 1:-1] = (
+            # Cardinal directions (weight = 1)
+            field[2:, 1:-1] + field[:-2, 1:-1] +
+            field[1:-1, 2:] + field[1:-1, :-2] +
+            # Diagonal directions (weight = 0.5)
+            0.5 * (field[2:, 2:] + field[:-2, :-2] + 
+                   field[2:, :-2] + field[:-2, 2:]) -
+            # Center (weight = 6)
+            6 * field[1:-1, 1:-1]
+        ) / dx2
+        
+        return laplacian
+
     def add_bacteria_source(self, x, y, amount):
-        """Deposit bacteria at (x,y) onto the grid"""
-        xi = int(self.convert_xy_to_index(x))
-        yi = int(self.convert_xy_to_index(y))
-        if 0 <= xi < self.bacteria_map.shape[1] and 0 <= yi < self.bacteria_map.shape[0]:
-            self.bacteria_map[yi, xi] += amount
+        # """Deposit bacteria at (x,y) onto the grid"""
+        # xi = int(self.convert_xy_to_index(x))
+        # yi = int(self.convert_xy_to_index(y))
+        # if 0 <= xi < self.bacteria_map.shape[1] and 0 <= yi < self.bacteria_map.shape[0]:
+        #     self.bacteria_map[yi, xi] += amount
+        #     def add_bacteria_source(self, x, y, amount):
+        """Deposit bacteria as a small patch at (x,y)"""
+        # Add a small Gaussian patch instead of single point
+        dx = self.x_grid - x
+        dy = self.y_grid - y
+        dist_sq = dx**2 + dy**2
+        
+        # Small radius patch (same as initial)
+        radius = 0.03
+        gaussian = amount * np.exp(-dist_sq / (2 * radius**2))
+        
+        # Only apply within radius
+        mask = np.sqrt(dist_sq) < (3 * radius)
+        self.bacteria_map[mask] += gaussian[mask]
+
+        # Clip to prevent exceeding carrying capacity
+        self.bacteria_map = np.clip(self.bacteria_map, 0, 1)
+
+        # self.init_bacteria_patch(x, y, radius=0.01, amplitude=amount)
 
     def convert_xy_to_index(self, xy):
         # Convert real coordinates (x or y) to grid indices
