@@ -15,6 +15,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 def read_config(base_exp_dir):
+    """Read configuration options from .cfg file in experiment directory"""
     cfg_paths = glob2.glob(f"{base_exp_dir}/*.cfg")
 
     if not cfg_paths:
@@ -45,6 +46,7 @@ def read_config(base_exp_dir):
     return cfg_opts
 
 def imgs2vid(imgs, outpath, fps=15):
+    """Convert list of images to video using OpenCV"""
     height, width, layers = imgs[0].shape
     fourcc = cv2.VideoWriter_fourcc("m", "p", "4", "v")
     video = cv2.VideoWriter(outpath, fourcc, fps, (width, height), True)
@@ -56,6 +58,7 @@ def imgs2vid(imgs, outpath, fps=15):
     video.release()
 
 def process_data(env_path, worm_path):
+    """Process worm and bacteria data from HDF5 files"""
     # Load bacteria time series (3D array)
     bacteria_history = []
     with h5py.File(env_path, 'r') as infile:
@@ -78,6 +81,7 @@ def process_data(env_path, worm_path):
     return worms, bacteria_history
 
 def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_config, convert_xy_to_index, total_frames):  
+    """Plot a single frame of the simulation including worms and bacteria concentration"""
     # Plot bacteria concentration map with gradient
     if len(bacteria_history) > frame_i:
         bacteria_grid = bacteria_history[frame_i]
@@ -93,14 +97,6 @@ def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_co
         # Add colorbar to show concentration scale
         clb = plt.colorbar(im, shrink=0.8, format='%.2f')
         clb.ax.set_title('Bacteria\nConc.')
-
-    # # Plot bacteria dropped up to current frame
-    # if len(bacteria_history) > frame_i:
-    #     bacteria_grid = bacteria_history[frame_i]
-    #     # Get indices where bacteria exists
-    #     y_indices, x_indices = np.where(bacteria_grid > 0)
-    #     if len(x_indices) > 0:
-    #         plt.scatter(x_indices, y_indices, color='green', s=20, alpha=0.6, marker='o')
 
     # Process worm data
     for worm_key, worm_vals in worms.items():
@@ -138,6 +134,7 @@ def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_co
     plt.close()
 
 def setup_opts():
+    """Setup command line options for the script"""
     parser = argparse.ArgumentParser()
     parser.add_argument('-p', '--path', type=str, default='N1_seed42', help='Path to experiment folder')
     parser.add_argument('-r', '--fps', type=int, default=5, help='FPS for output movie')
@@ -145,6 +142,7 @@ def setup_opts():
     return parser.parse_args()
 
 def main(exp_path, fps, stepsize):
+    """Main function to generate movie frames and compile them into a video"""
     # Obtain parameters from config
     script_config = read_config(exp_path)
     X_MIN = script_config['x_min']
