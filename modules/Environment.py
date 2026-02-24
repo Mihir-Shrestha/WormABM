@@ -41,7 +41,7 @@ class Environment:
     def __init_bacteria_map(self):
         """Initialize bacteria concentration map to zeros"""
         self.bacteria_map = np.zeros_like(self.x_grid, dtype=float)
-        self.init_bacteria_patch(x_center=0.0, y_center=0.0, radius=0.1, amplitude=1)
+        self.init_bacteria_patch(x_center=0.0, y_center=0.0, radius=0.1, amplitude=0.5)
 
     def init_bacteria_patch(self, x_center, y_center, radius, amplitude):
         """
@@ -66,14 +66,12 @@ class Environment:
         """
         Solve ∂b/∂t = ∇²b + b(1-b) using finite differences
         """
-        # Compute Laplacian (diffusion term)
+
         laplacian = self.__compute_laplacian(self.bacteria_map)
-        # Compute logistic growth term with r = 1
         growth = self.bacteria_map * (1 - self.bacteria_map)
-        # Forward Euler time step: b_new = b_old + dt * (∇²b + b(1-b))
-        self.bacteria_map += self.dt * (laplacian + growth)
-        # Clamp to [0, 1] to avoid numerical instability
-        self.bacteria_map = np.clip(self.bacteria_map, 0, 1)
+
+        # Combined diffusion + growth
+        self.bacteria_map = self.bacteria_map + self.dt * (self.diffusion_coefficient * laplacian + growth)
 
     def __compute_laplacian(self, field):
         """
@@ -88,10 +86,10 @@ class Environment:
             field[2:, 1:-1] + field[:-2, 1:-1] +
             field[1:-1, 2:] + field[1:-1, :-2] +
             # Diagonal directions (weight = 0.5)
-            0.5 * (field[2:, 2:] + field[:-2, :-2] + 
+            0.25 * (field[2:, 2:] + field[:-2, :-2] + 
                    field[2:, :-2] + field[:-2, 2:]) -
             # Center (weight = 6)
-            6 * field[1:-1, 1:-1]
+            3 * field[1:-1, 1:-1]
         ) / dx2
         return laplacian
 

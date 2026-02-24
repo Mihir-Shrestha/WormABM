@@ -94,8 +94,8 @@ class Worm(object):
 
     def __drop_bacteria(self, environment):
         """Drop bacteria source at current location at fixed intervals"""
-        if not self.bacteria_enabled:
-            return
+        # if not self.bacteria_enabled:
+        #     return
         if self.timestep >= self.next_drop_timestep:
             environment.add_bacteria_source(self.x, self.y, self.bacteria_amount)
             self.next_drop_timestep += int(self.bacteria_drop_interval)
@@ -105,5 +105,8 @@ class Worm(object):
         self.__update_angle()
         self.__update_movement(environment)
         self.__update_state()
-        self.__drop_bacteria(environment)
+        if not self.bacteria_enabled:
+            return
+        else:
+            self.__drop_bacteria(environment)
         self.timestep += 1

@@ -1,15 +1,20 @@
 config_opts = {
     # Simulation parameters
-    "verbose"     : True,
+    # "verbose"     : False,
     "random_seed" : 42,
 
     # Environment parameters
     "x_min" : -1.5,
     "x_max" : 1.5,
-    "dx" : 0.01,
+    # "dx" : 0.01,
+    # "t_min" : 0,
+    # "t_max" : 0.0025,
+    # "dt" : 0.0000025,
     "t_min" : 0,
-    "t_max" : 0.0025,
-    "dt" : 0.000025,
+    "t_max" : 1,
+    "dx" : [0.1, 0.01],
+    "dt": [0.0001, 0.001],
+    "diffusion_coefficient" : [0.01, 0.1],
 
     # Worm parameters
     "num_worms" : 1,
@@ -17,9 +22,9 @@ config_opts = {
     "worm_turn_noise" : 0.2,
     "worm_mean_run_duration" : 3,
     "worm_mean_tumble_duration" : 2,
-    "bacteria_enabled" : True,
+    # "bacteria_enabled" : False,
     "bacteria_drop_interval" : 5,
-    "bacteria_amount" : 1,
+    "bacteria_amount" : 0,
 
     # Other parameters
     "measurements_on" : True,

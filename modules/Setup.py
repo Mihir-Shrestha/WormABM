@@ -20,7 +20,8 @@ def config_options():
     parser = argparse.ArgumentParser()
 
     # Simulation parameters
-    parser.add_argument("--verbose", type=bool, default=True)
+    # parser.add_argument("--verbose", type=bool, default=False)
+    parser.add_argument("--verbose", action='store_true', help="Enable verbose output")
     parser.add_argument("--random_seed", type=int, default=42)
     parser.add_argument("--measurements_on", type=bool, default=True)
 
@@ -31,6 +32,7 @@ def config_options():
     parser.add_argument("--t_min", type=float, default=0)
     parser.add_argument("--t_max", type=float, default=0.125)
     parser.add_argument("--dt", type=float, default=0.005)
+    parser.add_argument("--diffusion_coefficient", type=float, default=10.0)
 
     # Worm parameters
     parser.add_argument("--num_worms", type=int, default=1)
@@ -39,7 +41,8 @@ def config_options():
     parser.add_argument("--worm_mean_run_duration", type=float, default=3)
     parser.add_argument("--worm_mean_tumble_duration", type=float, default=2)
     # Bacteria drop parameters
-    parser.add_argument("--bacteria_enabled", type=bool, default=True)
+    # parser.add_argument("--bacteria_enabled", type=bool, default=False)
+    parser.add_argument("--bacteria_enabled", action='store_true', help="Enable bacteria dropping")
     parser.add_argument("--bacteria_drop_interval", type=int, default=5)
     parser.add_argument("--bacteria_amount", type=float, default=1.0)
 
@@ -65,8 +68,11 @@ def directory(config):
     # Create folder name with parameters
     N = config.num_worms
     seed = config.random_seed
+    diffusion_coefficient = config.diffusion_coefficient
     # params_name = f"N{N}_seed{seed}_{timestamp}"
-    params_name = f"N{N}_seed{seed}"
+    dx_value = f"{config.dx:.3f}".rstrip('0').rstrip('.')
+    dt_value = f"{config.dt:.10f}".rstrip('0').rstrip('.')
+    params_name = f"N{N}_dx{dx_value}_dt{dt_value}_D{diffusion_coefficient}"
     model_dir = os.path.join(config.base_dir, params_name)
 
     os.makedirs(model_dir, exist_ok=True)
@@ -93,6 +99,7 @@ def world_parameters(cfg, model_dir):
         "t_min": cfg.t_min,
         "t_max": cfg.t_max,
         "dt": cfg.dt,
+        "diffusion_coefficient": cfg.diffusion_coefficient,
     }
 
     worm_params = {

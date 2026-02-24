@@ -88,7 +88,8 @@ def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_co
         
         # Get min/max for color scaling
         min_b = np.min(bacteria_history)
-        max_b = np.max(bacteria_history) * 0.85
+        # max_b = np.max(bacteria_history) * 0.85
+        max_b = 1
         
         # Display bacteria as heatmap 
         im = plt.imshow(bacteria_grid, cmap='Greens', vmin=min_b, vmax=max_b, 
@@ -124,11 +125,16 @@ def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_co
     # Title
     N = script_config['num_worms']
     seed = int(script_config['random_seed'])
-    title = f"Number of worms: {int(N)} -- Random seed: {seed}"
-    plt.title(f"{title} \n t: {frame_i+1}/{total_frames}")
+    dx = script_config.get('dx', 'N/A')
+    dt = script_config.get('dt', 'N/A')
+    dx_value = f"{script_config.get('dx', 0):.3f}".rstrip('0').rstrip('.')
+    dt_value = f"{script_config.get('dt', 0):.10f}".rstrip('0').rstrip('.')
+    D = script_config.get('diffusion_coefficient', 'N/A')
+    title = f"Worms: {int(N)} -- dx: {dx_value} -- dt: {dt_value} -- D: {D}"
+    plt.title(f"{title} \n t: {frame_i}/{total_frames}")
 
     # Save frames
-    file_path = f't{frame_i+1:03d}.png'
+    file_path = f't{frame_i:04d}.png'
     filename = f'{MOVIE_FRAME_PATH}/{file_path}'
     plt.savefig(filename, bbox_inches='tight', dpi=150)
     plt.close()
@@ -136,9 +142,10 @@ def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_co
 def setup_opts():
     """Setup command line options for the script"""
     parser = argparse.ArgumentParser()
-    parser.add_argument('-p', '--path', type=str, default='N1_seed42', help='Path to experiment folder')
+    parser.add_argument('-p', '--path', type=str, default='default_path_value', help='Path to experiment folder')
     parser.add_argument('-r', '--fps', type=int, default=5, help='FPS for output movie')
     parser.add_argument('-s', '--stepsize', type=int, default=1, help='Step size for plotting data')
+    parser.add_argument('-a', '--all', action='store_true', help='Plot all experiments in the experiments/ folder')
     return parser.parse_args()
 
 def main(exp_path, fps, stepsize):
@@ -160,38 +167,117 @@ def main(exp_path, fps, stepsize):
 
     # Setup for plotting
     total_frames = len(list(worms.values())[0]['x'])
+
+    # Calculate total number of frames (stepsize) to be used in each movie
+    calculated_stepsize = max(1, total_frames // stepsize)
+
     texts = ['Worm', 'Bacteria']
     legend_colors = ['Gray', 'Green']
 
-    for frame_i in range(0, total_frames, stepsize):
-            sys.stdout.write(f"\rMaking frame {frame_i+1}/{total_frames}")
+    for frame_i in range(0, total_frames, calculated_stepsize):
+            sys.stdout.write(f"\rMaking frame {frame_i}/{total_frames-1}")
             sys.stdout.flush()
 
             plot_frame(frame_i, worms, bacteria_sources, legend_colors, texts, script_config, convert_xy_to_index, total_frames)
     
+    # Last frame
+    frame_i = total_frames - 1
+    sys.stdout.write(f"\rMaking frame {frame_i}/{total_frames-1}")
+    sys.stdout.flush()
+    plot_frame(frame_i, worms, bacteria_sources, legend_colors, texts, script_config, convert_xy_to_index, total_frames)
+
     # Stitching frames together to create video
     all_img_paths = np.sort(glob2.glob(f"{MOVIE_FRAME_PATH}/*.png"))
     all_imgs = np.array([cv2.imread(img) for img in all_img_paths])
     trial_name = os.path.basename(exp_path)  # Extract just 'N1_seed42'
-    savepath = os.path.join(exp_path, f"{trial_name}.mp4")
+    savepath = os.path.join("movies", f"{trial_name}.mp4")
     imgs2vid(all_imgs, savepath, fps)
 
 if __name__ == '__main__':
     opts = setup_opts()
 
-    TRIAL_PATH = opts.path
-    BASE_EXPERIMENT_DIR = f"experiments/{TRIAL_PATH}"
-    MOVIE_FRAME_PATH = f"{BASE_EXPERIMENT_DIR}/movie_frames"
-    if os.path.exists(MOVIE_FRAME_PATH):
-        shutil.rmtree(MOVIE_FRAME_PATH)
-    os.makedirs(MOVIE_FRAME_PATH, exist_ok=True)
-    print(BASE_EXPERIMENT_DIR)
-    print(TRIAL_PATH)
-
     FPS = opts.fps
-
     INTERVAL = opts.stepsize
 
     print("\n---------- Visualizing worm model data ----------")
-    main(BASE_EXPERIMENT_DIR, FPS, INTERVAL)
+    
+    # Create movies folder
+    movies_dir = "movies"
+    os.makedirs(movies_dir, exist_ok=True)
+
+    # Check if neither -p nor --all is specified
+    if not opts.all and opts.path == 'default_path_value':
+        print("Error: You must specify either -p/--path <experiment_folder> or use --all")
+        print("Example: python make_movie.py -p N1_seed42_dx0.01_dt0.0002_D0.1")
+        print("Or:      python make_movie.py --all")
+        sys.exit(1)
+
+    if opts.all:
+        # Process all experiments in the experiments/ folder
+        experiments_dir = "experiments"
+        
+        if not os.path.exists(experiments_dir):
+            print(f"Error: {experiments_dir} directory not found!")
+            sys.exit(1)
+
+        exp_folders = [f for f in os.listdir(experiments_dir) 
+                if os.path.isdir(os.path.join(experiments_dir, f)) 
+                and not f.startswith('.')]
+        
+        if not exp_folders:
+            print(f"Error: No experiment folders found in {experiments_dir}!")
+            sys.exit(1)
+        
+        exp_folders.sort()  # Sort folders alphabetically
+
+        print(f"\nFound {len(exp_folders)} experiments:")
+        for folder in exp_folders:
+            print(f"  - {folder}")
+        print()
+
+        for i, exp_folder in enumerate(exp_folders, 1):
+            print(f"{'='*60}\n")
+            print("="*60)
+            print(f"Processing {i}/{len(exp_folders)}: {exp_folder}")
+            
+            BASE_EXPERIMENT_DIR = os.path.join(experiments_dir, exp_folder)
+            MOVIE_FRAME_PATH = os.path.join(BASE_EXPERIMENT_DIR, "movie_frames")
+            
+            # Clean and create frame directory
+            if os.path.exists(MOVIE_FRAME_PATH):
+                shutil.rmtree(MOVIE_FRAME_PATH)
+            os.makedirs(MOVIE_FRAME_PATH, exist_ok=True)
+            
+            try:
+                main(BASE_EXPERIMENT_DIR, FPS, INTERVAL)
+                print(f"\n✓ Completed: {exp_folder}")
+            except Exception as e:
+                print(f"\n✗ Error processing {exp_folder}: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
+        
+        print("="*60 + "\n")
+        print(f"Finished! Processed {len(exp_folders)} experiments")
+        print("\n" + "="*60)
+    
+    else:
+        # Process single experiment specified by --path
+        TRIAL_PATH = opts.path
+        BASE_EXPERIMENT_DIR = f"experiments/{TRIAL_PATH}"
+        MOVIE_FRAME_PATH = f"{BASE_EXPERIMENT_DIR}/movie_frames"
+
+        if not os.path.exists(BASE_EXPERIMENT_DIR):
+            print(f"Error: {BASE_EXPERIMENT_DIR} not found!")
+            sys.exit(1)
+        
+        # Clean and create frame directory
+        if os.path.exists(MOVIE_FRAME_PATH):
+            shutil.rmtree(MOVIE_FRAME_PATH)
+        os.makedirs(MOVIE_FRAME_PATH, exist_ok=True)
+        
+        print(f"Processing: {BASE_EXPERIMENT_DIR}\n")
+        
+        main(BASE_EXPERIMENT_DIR, FPS, INTERVAL)
+    
     print("\nDone!\n")

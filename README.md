@@ -36,5 +36,5 @@ python make_movie.py -p <experiment_folder_name> -r 5 -s 1
 - `-p` or `--path`: Path to experiment folder in `experiments/` directory
 - `-r` or `--fps`: Frame rate for output movie (default: `5`)
 - `-s` or `--stepsize`: Step size for plotting frames (default: `1`)
-
+### Stepsize is being used as total number of frames for each movie irrespective of the number of timesteps
 The output video will be saved in the experiment folder.
