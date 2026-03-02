@@ -16,6 +16,7 @@ class Environment:
         # Bacteria concentration grid
         self.bacteria_map = []
         self.__init_bacteria_map()
+        self.__precompute_diffusion_factor()
 
     def __getitem__(self, idx):
         """Allow indexing: env[i] returns time at index i"""
@@ -62,36 +63,81 @@ class Environment:
         # Clip to prevent exceeding carrying capacity to value of 1
         self.bacteria_map = np.clip(self.bacteria_map, 0, 1)
 
+    def __precompute_diffusion_factor(self):
+        """
+        Precompute the Fourier space diffusion factor for half timestep.
+        This only needs to be computed once since D, dt, dx are fixed.
+        exp(-D * k^2 * dt/2) in Fourier space
+        """
+        nx, ny = self.bacteria_map.shape
+
+        # Compute wavenumbers for each axis
+        kx = np.fft.fftfreq(nx, d=self.dx) * 2 * np.pi
+        ky = np.fft.fftfreq(ny, d=self.dx) * 2 * np.pi
+
+        # Create 2D wavenumber grid
+        KX, KY = np.meshgrid(kx, ky, indexing='ij')
+        K2 = KX**2 + KY**2
+
+        # Diffusion factor for half timestep (Strang splitting)
+        self.diff_factor = np.exp(-self.diffusion_coefficient * K2 * self.dt / 2)
+
+    def __diffusion_step(self, b):
+        """
+        Apply exact diffusion for half timestep in Fourier space.
+        b_new = IFFT(FFT(b) * exp(-D*k^2*dt/2))
+        """
+        return np.real(np.fft.ifft2(np.fft.fft2(b) * self.diff_factor))
+
+    def __growth_step(self, b):
+        """
+        Apply exact logistic growth for full timestep using analytical solution.
+        db/dt = r * b * (1 - b/K)
+        b(t+dt) = K*b / (b + (K-b)*exp(-r*dt))
+        """
+        r = getattr(self, 'bacteria_growth_rate', 1.0)
+        K = getattr(self, 'bacteria_carrying_capacity', 1.0)
+
+        # Clip negatives before growth
+        b = np.clip(b, 0.0, None)
+
+        if r == 0.0:
+            return b
+
+        exp_term = np.exp(-r * self.dt)
+        numerator = K * b
+        denominator = b + (K - b) * exp_term
+
+        with np.errstate(divide='ignore', invalid='ignore'):
+            b_new = numerator / denominator
+
+        # Handle edge cases (nan, inf)
+        b_new = np.nan_to_num(b_new, nan=0.0, posinf=K, neginf=0.0)
+        return b_new
+    
     def update_bacteria_map(self):
         """
-        Solve ∂b/∂t = ∇²b + b(1-b) using finite differences
+        Solve db/dt = D*∇²b + r*b*(1-b) using Strang splitting:
+        1. Half diffusion step (exact, Fourier space)
+        2. Full logistic growth step (exact, analytical)
+        3. Half diffusion step (exact, Fourier space)
         """
+        # Step 1: half diffusion
+        b = self.__diffusion_step(self.bacteria_map)
 
-        laplacian = self.__compute_laplacian(self.bacteria_map)
-        growth = self.bacteria_map * (1 - self.bacteria_map)
+        # Step 2: full logistic growth
+        b_before_growth = b.copy()  # b before growth for diagnostics
+        b = self.__growth_step(b)
 
-        # Combined diffusion + growth
-        self.bacteria_map = self.bacteria_map + self.dt * (self.diffusion_coefficient * laplacian + growth)
+        # Diagnostic: print max growth change per step
+        growth_change = np.max(np.abs(b - b_before_growth))
+        print(f"Max growth change this step: {growth_change:.6f}")
 
-    def __compute_laplacian(self, field):
-        """
-        Compute ∇²b using 9-point stencil (includes diagonals)
-        """
-        laplacian = np.zeros_like(field)
-        dx2 = self.dx ** 2
-        
-        # 9-point stencil: includes diagonal neighbors
-        laplacian[1:-1, 1:-1] = (
-            # Cardinal directions (weight = 1)
-            field[2:, 1:-1] + field[:-2, 1:-1] +
-            field[1:-1, 2:] + field[1:-1, :-2] +
-            # Diagonal directions (weight = 0.5)
-            0.25 * (field[2:, 2:] + field[:-2, :-2] + 
-                   field[2:, :-2] + field[:-2, 2:]) -
-            # Center (weight = 6)
-            3 * field[1:-1, 1:-1]
-        ) / dx2
-        return laplacian
+        # Step 3: half diffusion
+        b = self.__diffusion_step(b)
+
+        # Clip only negative values (unphysical)
+        self.bacteria_map = np.clip(b, 0.0, None)
 
     def add_bacteria_source(self, x, y, amount):
         """Deposits bacteria as a small patch at (x,y)"""

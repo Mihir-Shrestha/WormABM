@@ -11,10 +11,12 @@ config_opts = {
     # "t_max" : 0.0025,
     # "dt" : 0.0000025,
     "t_min" : 0,
-    "t_max" : 1,
-    "dx" : [0.1, 0.01],
-    "dt": [0.0001, 0.001],
-    "diffusion_coefficient" : [0.01, 0.1],
+    "t_max" : 10,
+    "dx" : [0.01],                              # dx: spatial resolution (smaller = more accurate but slower)
+    "dt": [0.01, 0.001],                      # dt: time step (smaller = more accurate but slower)
+    "diffusion_coefficient" : [0.0005, 0.0001, 0, 0.001],  
+    "bacteria_growth_rate" : 1.0,               # r: how fast bacteria grows
+    "bacteria_carrying_capacity" : 1.0,         # K: max concentration bacteria can reach
 
     # Worm parameters
     "num_worms" : 1,

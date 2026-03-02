@@ -7,3 +7,4 @@ env
 movies/
 experiments/
 config/files/
+samples/*

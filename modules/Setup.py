@@ -33,6 +33,8 @@ def config_options():
     parser.add_argument("--t_max", type=float, default=0.125)
     parser.add_argument("--dt", type=float, default=0.005)
     parser.add_argument("--diffusion_coefficient", type=float, default=10.0)
+    parser.add_argument("--bacteria_growth_rate", type=float, default=1.0)
+    parser.add_argument("--bacteria_carrying_capacity", type=float, default=1.0)
 
     # Worm parameters
     parser.add_argument("--num_worms", type=int, default=1)
@@ -100,6 +102,8 @@ def world_parameters(cfg, model_dir):
         "t_max": cfg.t_max,
         "dt": cfg.dt,
         "diffusion_coefficient": cfg.diffusion_coefficient,
+        "bacteria_growth_rate": cfg.bacteria_growth_rate,
+        "bacteria_carrying_capacity": cfg.bacteria_carrying_capacity,
     }
 
     worm_params = {
