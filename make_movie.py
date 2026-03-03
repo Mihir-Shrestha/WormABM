@@ -87,11 +87,9 @@ def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_co
         bacteria_grid = bacteria_history[frame_i]
         
         # Get min/max for color scaling
-        min_b = np.min(bacteria_history)
-        # max_b = np.max(bacteria_history) * 0.85
-        max_b = 1
-        
-        # Display bacteria as heatmap 
+        min_b = script_config.get('rho_0', 1.27e8) * 0.85  # Slightly below initial density
+        max_b = script_config.get('K_rho', 4.58e8)
+
         im = plt.imshow(bacteria_grid, cmap='Greens', vmin=min_b, vmax=max_b, 
                         origin='upper', alpha=0.8, interpolation='bilinear')
         
@@ -124,13 +122,11 @@ def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_co
 
     # Title
     N = script_config['num_worms']
-    seed = int(script_config['random_seed'])
-    dx = script_config.get('dx', 'N/A')
-    dt = script_config.get('dt', 'N/A')
     dx_value = f"{script_config.get('dx', 0):.3f}".rstrip('0').rstrip('.')
     dt_value = f"{script_config.get('dt', 0):.10f}".rstrip('0').rstrip('.')
-    D = script_config.get('diffusion_coefficient', 'N/A')
-    title = f"Worms: {int(N)} -- dx: {dx_value} -- dt: {dt_value} -- D: {D}"
+    g_A      = script_config.get('g_A',   'N/A')
+    g_rho    = script_config.get('g_rho', 'N/A')
+    title = f"Worms: {int(N)} -- dx: {dx_value} -- dt: {dt_value} -- g_A: {g_A:.2e} -- g_rho: {g_rho:.2e}"
     plt.title(f"{title} \n t: {frame_i}/{total_frames}")
 
     # Save frames

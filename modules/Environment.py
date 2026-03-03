@@ -2,12 +2,14 @@ import numpy as np
 
 class Environment:
     """
-        Pieces of the environment
-        ---------------------------
-        1. Bacteria Concentration Map (Grid)
-          - Diffusion equation
-        2. Time-course
+    Environment containing:
+      1. A single circular bacterial patch governed by logistic ODEs (S1, S2):
+            dA_B/dt  = g_A   * A_B * (1 - A_B  / K_A)
+            drho/dt  = g_rho * rho * (1 - rho   / K_rho)
+      2. A 2D spatial bacteria_map grid (density rho inside patch, 0 outside)
+      3. A time-course grid
     """
+
     def __init__(self, params):
         self.__set_params(params)
         self.__init_environment_grid()
@@ -16,7 +18,6 @@ class Environment:
         # Bacteria concentration grid
         self.bacteria_map = []
         self.__init_bacteria_map()
-        self.__precompute_diffusion_factor()
 
     def __getitem__(self, idx):
         """Allow indexing: env[i] returns time at index i"""
@@ -40,108 +41,70 @@ class Environment:
         self.t_grid = np.arange(self.t_min, self.t_max, self.dt)
 
     def __init_bacteria_map(self):
-        """Initialize bacteria concentration map to zeros"""
+        """
+        Initialise ODE state variables and build the first spatial map.
+        A_B_0 = pi * 0.5^2 cm^2  (initial patch radius = 0.5 cm from paper)
+        rho_0 = 1.27e8 cells/cm^2 (from Table S1)
+        K_A defaults to arena area = (x_max - x_min)^2 if not supplied.
+        """
+        arena_side = self.x_max - self.x_min           # cm
+        # default_K_A = arena_side ** 2                   # cm^2 (square arena)
+        default_K_A = np.pi * 10**2      # cm^2 (circular arena inscribed in square)
+
+        # ODE parameters (fall back to Table S1 values if not in params)
+        self.g_A   = getattr(self, "g_A")           # min^-1
+        self.g_rho = getattr(self, "g_rho")           # min^-1
+        self.K_A   = getattr(self, "K_A", default_K_A)       # cm^2
+        self.K_rho = getattr(self, "K_rho")            # cells/cm^2
+
+        # Scalar ODE state variables
+        self.A_B = getattr(self, "A_B_0", np.pi * 0.5**2)      # cm^2
+        self.rho = getattr(self, "rho_0", 1.27e8)               # cells/cm^2
+
         self.bacteria_map = np.zeros_like(self.x_grid, dtype=float)
-        self.init_bacteria_patch(x_center=0.0, y_center=0.0, radius=0.1, amplitude=0.5)
+        self.__init_bacteria_patch()
 
-    def init_bacteria_patch(self, x_center, y_center, radius, amplitude):
+    def __init_bacteria_patch(self):
         """
-        Initialize a Gaussian patch of bacteria at (x_center, y_center)
-        Only sets bacteria within a certain radius, keeps rest at zero
+        Paint the circular patch onto the grid.
+        Radius is derived from current A_B: r = sqrt(A_B / pi)
+        Cells inside the circle get value rho, everything outside is 0.
+        Patch is always centred at (0, 0).
         """
-        dx = self.x_grid - x_center
-        dy = self.y_grid - y_center
-        dist_sq = dx**2 + dy**2
-        
-        # Create Gaussian
-        gaussian = amplitude * np.exp(-dist_sq / (2 * radius**2))
-        
-        # Only apply where distance < 3*radius (99.7% of distribution) and everything outside the mask stays at 0
-        mask = np.sqrt(dist_sq) < (3 * radius)
-        self.bacteria_map[mask] += gaussian[mask]
+        r    = np.sqrt(self.A_B / np.pi)               # current radius (cm)
+        dist = np.sqrt(self.x_grid**2 + self.y_grid**2)
+        self.bacteria_map = np.where(dist <= r, self.rho, 0.0)
 
-        # Clip to prevent exceeding carrying capacity to value of 1
-        self.bacteria_map = np.clip(self.bacteria_map, 0, 1)
-
-    def __precompute_diffusion_factor(self):
+    def __logistic_step(self, x, g, K):
         """
-        Precompute the Fourier space diffusion factor for half timestep.
-        This only needs to be computed once since D, dt, dx are fixed.
-        exp(-D * k^2 * dt/2) in Fourier space
+        Exact analytical solution of logistic ODE over one timestep dt:
+            x(t+dt) = K*x / (x + (K - x)*exp(-g*dt))
         """
-        nx, ny = self.bacteria_map.shape
-
-        # Compute wavenumbers for each axis
-        kx = np.fft.fftfreq(nx, d=self.dx) * 2 * np.pi
-        ky = np.fft.fftfreq(ny, d=self.dx) * 2 * np.pi
-
-        # Create 2D wavenumber grid
-        KX, KY = np.meshgrid(kx, ky, indexing='ij')
-        K2 = KX**2 + KY**2
-
-        # Diffusion factor for half timestep (Strang splitting)
-        self.diff_factor = np.exp(-self.diffusion_coefficient * K2 * self.dt / 2)
-
-    def __diffusion_step(self, b):
-        """
-        Apply exact diffusion for half timestep in Fourier space.
-        b_new = IFFT(FFT(b) * exp(-D*k^2*dt/2))
-        """
-        return np.real(np.fft.ifft2(np.fft.fft2(b) * self.diff_factor))
-
-    def __growth_step(self, b):
-        """
-        Apply exact logistic growth for full timestep using analytical solution.
-        db/dt = r * b * (1 - b/K)
-        b(t+dt) = K*b / (b + (K-b)*exp(-r*dt))
-        """
-        r = getattr(self, 'bacteria_growth_rate', 1.0)
-        K = getattr(self, 'bacteria_carrying_capacity', 1.0)
-
-        # Clip negatives before growth
-        b = np.clip(b, 0.0, None)
-
-        if r == 0.0:
-            return b
-
-        exp_term = np.exp(-r * self.dt)
-        numerator = K * b
-        denominator = b + (K - b) * exp_term
-
-        with np.errstate(divide='ignore', invalid='ignore'):
-            b_new = numerator / denominator
-
-        # Handle edge cases (nan, inf)
-        b_new = np.nan_to_num(b_new, nan=0.0, posinf=K, neginf=0.0)
-        return b_new
+        if g == 0.0 or x <= 0.0:
+            return x
+        exp_term = np.exp(-g * self.dt)
+        return K * x / (x + (K - x) * exp_term)
     
     def update_bacteria_map(self):
         """
-        Solve db/dt = D*∇²b + r*b*(1-b) using Strang splitting:
-        1. Half diffusion step (exact, Fourier space)
-        2. Full logistic growth step (exact, analytical)
-        3. Half diffusion step (exact, Fourier space)
+        Advance A_B and rho by dt minutes using exact logistic solutions (S1, S2),
+        then rebuild the spatial bacteria map.
         """
-        # Step 1: half diffusion
-        b = self.__diffusion_step(self.bacteria_map)
+        self.A_B = self.__logistic_step(self.A_B, self.g_A,   self.K_A)
+        self.rho = self.__logistic_step(self.rho,  self.g_rho, self.K_rho)
+        self.__init_bacteria_patch()
 
-        # Step 2: full logistic growth
-        b_before_growth = b.copy()  # b before growth for diagnostics
-        b = self.__growth_step(b)
-
-        # Diagnostic: print max growth change per step
-        growth_change = np.max(np.abs(b - b_before_growth))
-        print(f"Max growth change this step: {growth_change:.6f}")
-
-        # Step 3: half diffusion
-        b = self.__diffusion_step(b)
-
-        # Clip only negative values (unphysical)
-        self.bacteria_map = np.clip(b, 0.0, None)
+        # Debug print
+        # print(
+        #     f"A_B={self.A_B:.4f} cm^2  "
+        #     f"r={np.sqrt(self.A_B/np.pi):.4f} cm  "
+        #     f"rho={self.rho:.3e} cells/cm^2  "
+        #     f"B={self.A_B * self.rho:.3e} cells"
+        # )
 
     def add_bacteria_source(self, x, y, amount):
         """Deposits bacteria as a small patch at (x,y)"""
-        self.init_bacteria_patch(x_center=x, y_center=y, radius=0.03, amplitude=amount)
+        self.__init_bacteria_patch(x_center=x, y_center=y, radius=0.03, amplitude=amount)
 
     def convert_xy_to_index(self, xy):
         """Convert real coordinates (x or y) to grid indices"""

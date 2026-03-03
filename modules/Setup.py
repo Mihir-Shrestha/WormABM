@@ -30,11 +30,16 @@ def config_options():
     parser.add_argument("--x_max", type=float, default=1.5)
     parser.add_argument("--dx", type=float, default=0.01)
     parser.add_argument("--t_min", type=float, default=0)
-    parser.add_argument("--t_max", type=float, default=0.125)
-    parser.add_argument("--dt", type=float, default=0.005)
-    parser.add_argument("--diffusion_coefficient", type=float, default=10.0)
-    parser.add_argument("--bacteria_growth_rate", type=float, default=1.0)
-    parser.add_argument("--bacteria_carrying_capacity", type=float, default=1.0)
+    parser.add_argument("--t_max", type=float, default=6000)
+    parser.add_argument("--dt", type=float, default=1)\
+    
+    # ODE parameters (defaults from Table S1)
+    parser.add_argument("--g_A", type=float, default=1.13e-4)           # area growth rate (min^-1)
+    parser.add_argument("--g_rho", type=float, default=1.07e-3)         # density growth rate (min^-1)
+    parser.add_argument("--K_A", type=float, default=9.0)              # area carrying capacity (cm^2)
+    parser.add_argument("--K_rho", type=float, default=4.58e8)         # density carrying capacity (cells/cm^2)
+    parser.add_argument("--A_B_0", type=float, default=np.pi * 0.5**2)  # initial patch area = pi * 0.5^2 cm^2
+    parser.add_argument("--rho_0", type=float, default=1.27e8)          # initial density (cells/cm^2)
 
     # Worm parameters
     parser.add_argument("--num_worms", type=int, default=1)
@@ -70,11 +75,9 @@ def directory(config):
     # Create folder name with parameters
     N = config.num_worms
     seed = config.random_seed
-    diffusion_coefficient = config.diffusion_coefficient
-    # params_name = f"N{N}_seed{seed}_{timestamp}"
     dx_value = f"{config.dx:.3f}".rstrip('0').rstrip('.')
     dt_value = f"{config.dt:.10f}".rstrip('0').rstrip('.')
-    params_name = f"N{N}_dx{dx_value}_dt{dt_value}_D{diffusion_coefficient}"
+    params_name = f"N{N}_dx{dx_value}_dt{dt_value}_gA{config.g_A:.1e}_gRho{config.g_rho:.1e}"
     model_dir = os.path.join(config.base_dir, params_name)
 
     os.makedirs(model_dir, exist_ok=True)
@@ -101,9 +104,12 @@ def world_parameters(cfg, model_dir):
         "t_min": cfg.t_min,
         "t_max": cfg.t_max,
         "dt": cfg.dt,
-        "diffusion_coefficient": cfg.diffusion_coefficient,
-        "bacteria_growth_rate": cfg.bacteria_growth_rate,
-        "bacteria_carrying_capacity": cfg.bacteria_carrying_capacity,
+        "g_A": cfg.g_A,
+        "g_rho": cfg.g_rho,
+        "K_A": cfg.K_A,
+        "K_rho": cfg.K_rho,
+        "A_B_0": cfg.A_B_0,
+        "rho_0": cfg.rho_0,
     }
 
     worm_params = {

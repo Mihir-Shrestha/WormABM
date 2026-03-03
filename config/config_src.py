@@ -6,17 +6,18 @@ config_opts = {
     # Environment parameters
     "x_min" : -1.5,
     "x_max" : 1.5,
-    # "dx" : 0.01,
-    # "t_min" : 0,
-    # "t_max" : 0.0025,
-    # "dt" : 0.0000025,
     "t_min" : 0,
-    "t_max" : 10,
-    "dx" : [0.01],                              # dx: spatial resolution (smaller = more accurate but slower)
-    "dt": [0.01, 0.001],                      # dt: time step (smaller = more accurate but slower)
-    "diffusion_coefficient" : [0.0005, 0.0001, 0, 0.001],  
-    "bacteria_growth_rate" : 1.0,               # r: how fast bacteria grows
-    "bacteria_carrying_capacity" : 1.0,         # K: max concentration bacteria can reach
+    "t_max" : 6000,
+    "dx" : [0.01],               # dx: spatial resolution (smaller = more accurate but slower)
+    "dt": [1],                   # dt: time step (smaller = more accurate but slower)
+
+    # Bacteria ODE parameters (Eqs. S1 & S2, Table S1)
+    "g_A"   : 1.13e-4,           # area growth rate (min^-1)
+    "g_rho" : 1.07e-3,           # density growth rate (min^-1)
+    "K_rho" : 4.58e8,            # density carrying capacity (cells/cm^2)
+    # K_A is computed automatically in Environment as (x_max - x_min)^2 = 9 cm^2
+    "A_B_0" : 0.7854,            # initial patch area = pi * 0.5^2 cm^2
+    "rho_0" : 1.27e8,            # initial density (cells/cm^2)
 
     # Worm parameters
     "num_worms" : 1,
