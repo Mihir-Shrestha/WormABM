@@ -18,13 +18,8 @@ class Keeper(object):
             "worm_i" : [],
             "x"     : [],
             "y"     : [],
-            "state" : [], 
-            "angle" : [],
-            "timestep" : [],
+            "theta" : [],
         }
-
-        states = ["run", "tumble"]
-        self.state_encoding = { state : i for i, state in enumerate(states) }
 
     def __update_worm_history(self, worm_info):
         for key, val in worm_info.items():
@@ -58,9 +53,7 @@ class Keeper(object):
             "worm_i" : worm.num,
             "x"      : worm.x,
             "y"      : worm.y,
-            "state"  : self.state_encoding[worm.state],
-            "angle"  : worm.angle,
-            "timestep": worm.timestep,
+            "theta"  : worm.theta,
         }
         self.__update_worm_history(worm_info)
 

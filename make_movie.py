@@ -94,8 +94,8 @@ def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_co
                         origin='upper', alpha=0.8, interpolation='bilinear')
         
         # Add colorbar to show concentration scale
-        clb = plt.colorbar(im, shrink=0.8, format='%.2f')
-        clb.ax.set_title('Bacteria\nConc.')
+        clb = plt.colorbar(im, shrink=0.8, format='%.2e')
+        clb.ax.set_title('Density\ncells/cm²', fontsize=7)
 
     # Process worm data
     for worm_key, worm_vals in worms.items():

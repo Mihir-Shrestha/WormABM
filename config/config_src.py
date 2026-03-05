@@ -1,3 +1,5 @@
+import numpy as np
+
 config_opts = {
     # Simulation parameters
     # "verbose"     : False,
@@ -19,13 +21,16 @@ config_opts = {
     "A_B_0" : 0.7854,            # initial patch area = pi * 0.5^2 cm^2
     "rho_0" : 1.27e8,            # initial density (cells/cm^2)
 
-    # Worm parameters
-    "num_worms" : 1,
-    "worm_step_size" : 0.1,
-    "worm_turn_noise" : 0.2,
-    "worm_mean_run_duration" : 3,
-    "worm_mean_tumble_duration" : 2,
-    # "bacteria_enabled" : False,
+    # Worm SDE motility parameters
+    "num_worms" : 10,
+    "v_max" : 0.02,              # speed at low bacterial density (exploring) (cm/min)
+    "v_min" : 0.001,             # speed at high bacterial density (dwelling) (cm/min)
+    "alpha" : 4.0,             # how strongly speed decreases with bacterial density (speed suppresion sensitivity)
+    "beta_b" : 4.0,            # how strongly bacterial density suppresses speed (noise suppressioin sensitivity)
+    "chi_theta" : 6.0,         # chemotactic turning sensitivity (rad)
+    "D_theta" : (np.pi/8)**2 / 2.0,           # max rotational diffusion (at b=0) (rad^2/min)
+
+    # "bacteria_enabled" : False,  (Not active yet)
     "bacteria_drop_interval" : 5,
     "bacteria_amount" : 0,
 
@@ -33,9 +38,11 @@ config_opts = {
     "measurements_on" : True,
 }
 
-
-# reference calculations:
-# arena_size = x_max - x_min  # 1.5 - (-1.5) = 3.0
-# grid_size = (x_max - x_min) / dx + 1  # 3.0 / 0.01 + 1 = 301
-# total_duration = t_max - t_min  # 0.125 - 0 = 0.125
-# num_timesteps = total_duration / dt  # 0.125 / 0.005 = 25
+    # reference calculations:
+    # arena_size  = x_max - x_min        = 3.0 cm
+    # grid_size   = arena_size / dx + 1  = 301 x 301
+    # K_A         = arena_size^2         = 9.0 cm^2
+    # A_B_0       = pi * 0.5^2          = 0.7854 cm^2
+    # total_time  = t_max - t_min        = 6000 min (~4.2 days)
+    # num_steps   = total_time / dt      = 6000
+    # D_theta     = (pi/8)^2 / 2        = ~0.0308 rad^2/min

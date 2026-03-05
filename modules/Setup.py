@@ -43,10 +43,13 @@ def config_options():
 
     # Worm parameters
     parser.add_argument("--num_worms", type=int, default=1)
-    parser.add_argument("--worm_step_size", type=float, default=0.1)
-    parser.add_argument("--worm_turn_noise", type=float, default=0.2)
-    parser.add_argument("--worm_mean_run_duration", type=float, default=3)
-    parser.add_argument("--worm_mean_tumble_duration", type=float, default=2)
+    parser.add_argument("--v_max", type=float, default=0.02)                            # speed at low bacterial density (exploring)
+    parser.add_argument("--v_min", type=float, default=0.001)                           # speed at high bacterial density (dwelling)
+    parser.add_argument("--alpha", type=float, default=4.0)                             # how strongly speed decreases with bacterial density
+    parser.add_argument("--beta_b", type=float, default=4.0)                            # how strongly bacterial density suppresses speed
+    parser.add_argument("--chi_theta", type=float, default=6.0)                         # chemotactic turning sensitivity
+    parser.add_argument("--D_theta", type=float, default=(np.pi/8)**2 / 2.0)           # max rotational diffusion (at b=0)
+
     # Bacteria drop parameters
     # parser.add_argument("--bacteria_enabled", type=bool, default=False)
     parser.add_argument("--bacteria_enabled", action='store_true', help="Enable bacteria dropping")
@@ -113,10 +116,15 @@ def world_parameters(cfg, model_dir):
     }
 
     worm_params = {
-        "worm_step_size": cfg.worm_step_size,
-        "worm_turn_noise": cfg.worm_turn_noise,
-        "worm_mean_run_duration": cfg.worm_mean_run_duration,
-        "worm_mean_tumble_duration": cfg.worm_mean_tumble_duration,
+        "num_worms": cfg.num_worms,
+        # SDE motility parameters
+        "v_max": cfg.v_max,
+        "v_min": cfg.v_min,
+        "alpha": cfg.alpha,
+        "beta_b": cfg.beta_b,
+        "chi_theta": cfg.chi_theta,
+        "D_theta": cfg.D_theta,
+        # Bacteria dropping parameters
         "bacteria_enabled": cfg.bacteria_enabled,
         "bacteria_drop_interval": cfg.bacteria_drop_interval,
         "bacteria_amount": cfg.bacteria_amount,
@@ -136,39 +144,33 @@ def convert_index_to_xy(idx, idx_min=0, idx_max=300, xy_min=-1.5, xy_max=1.5):
     return xy
 
 def generate_points_with_min_distance(num_worms, shape, min_dist):
-    # Generate initial positions for multiple worms
-    # Ensures minimum distance between starting positions
+    """Generate initial positions for worms ensuring minimum distance between them"""
 
     # Handle edge case: single worm
     if num_worms <= 1:
-        # Return center position
         center_x = shape[1] / 2
         center_y = shape[0] / 2
         return np.array([[center_x, center_y]])
 
-    # Compute grid shape based on number of worms
-    width_ratio = shape[1] / shape[0]
-    num_y = int(np.sqrt(num_worms / width_ratio)) + 1
-    num_x = int(num_worms / num_y) + 1
+    # Use ceil(sqrt) to guarantee enough grid points for num_worms
+    num_side = int(np.ceil(np.sqrt(num_worms)))  # e.g. 20 worms → ceil(sqrt(20))=5 → 5x5=25 points
 
-    # Create regularly spaced points
-    x = np.linspace(0, shape[1], int(num_x))[1:-1]
-    y = np.linspace(0, shape[0], int(num_y))[1:-1]
+    x = np.linspace(0, shape[1], num_side + 2)[1:-1]  # exclude arena edges
+    y = np.linspace(0, shape[0], num_side + 2)[1:-1]
+
     coords = np.stack(np.meshgrid(x, y), -1).reshape(-1, 2)
+    # coords always has num_side^2 >= num_worms points
 
-    # Compute spacing safely
+    # Compute jitter range
     if len(x) > 1 and len(y) > 1:
-        init_dist = np.min((x[1] - x[0], y[1] - y[0]))
+        init_dist = min(x[1] - x[0], y[1] - y[0])
     else:
-        init_dist = np.min(shape)
+        init_dist = min(shape)
 
-    # Perturb points with random noise
-    max_movement = (init_dist - min_dist) / 2
-    noise = np.random.uniform(low=-max_movement,
-                              high=max_movement,
-                              size=(len(coords), 2))
-    coords += noise
-    return coords
+    max_movement = max((init_dist - min_dist) / 2, 0)  # clamp to 0, never negative
+    noise = np.random.uniform(-max_movement, max_movement, size=(len(coords), 2))
+
+    return coords + noise
 
 def create_worms(coords, dim, cfg, worm_params):
     # Create worm objects with initial positions from grid coordinates
@@ -177,7 +179,7 @@ def create_worms(coords, dim, cfg, worm_params):
     
     for worm_i in range(cfg.num_worms):
         # Copy params for this worm
-        worm_params_copy = worm_params
+        worm_params_copy = worm_params.copy()
         worm_params_copy["num"] = worm_i
         
         # Create worm object
