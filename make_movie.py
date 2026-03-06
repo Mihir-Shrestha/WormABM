@@ -74,9 +74,10 @@ def process_data(env_path, worm_path):
     worms = {}
     for worm_num in worm_nums:
         idxs = np.where(worm_data['worm_i']==worm_num)
-        worm_x = worm_data['x'][idxs]
-        worm_y = worm_data['y'][idxs]
-        worms[worm_num] = {"x" : worm_x, "y" : worm_y,}
+        worms[worm_num] = {
+            "x" : worm_data['x'][idxs],
+            "y" : worm_data['y'][idxs],
+        }
 
     return worms, bacteria_history
 
@@ -86,6 +87,9 @@ def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_co
     if len(bacteria_history) > frame_i:
         bacteria_grid = bacteria_history[frame_i]
         
+        # Mask zeros so background stays white, not dark green
+        bacteria_masked = np.ma.masked_where(bacteria_grid == 0, bacteria_grid)
+
         # Get min/max for color scaling
         min_b = script_config.get('rho_0', 1.27e8) * 0.85  # Slightly below initial density
         max_b = script_config.get('K_rho', 4.58e8)
@@ -97,41 +101,72 @@ def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_co
         clb = plt.colorbar(im, shrink=0.8, format='%.2e')
         clb.ax.set_title('Density\ncells/cm²', fontsize=7)
 
-    # Process worm data
-    for worm_key, worm_vals in worms.items():
-        x = worm_vals['x'][frame_i]
-        y = worm_vals['y'][frame_i]
-        color = 'Gray'
-        plt.scatter(convert_xy_to_index(x), convert_xy_to_index(y),
-                    color=color, s=100, edgecolors='black', zorder = 10)
+    # --- worms and trails ---
+    num_worms  = len(worms)
+    worm_colors = plt.cm.tab10(np.linspace(0, 1, max(num_worms, 1)))
 
-    # Plot formatting
-    patches = [ plt.plot([],[], marker="o", ms=10 if color_i==0 else 6, ls="", color=legend_colors[color_i],
-                markeredgecolor="black", label="{:s}".format(texts[color_i]) )[0]  for color_i in range(len(texts)) ]
-    plt.legend(handles=patches, bbox_to_anchor=(0.5, -0.15),
-               loc='center', ncol=4, numpoints=1, labelspacing=0.3,
-               fontsize='small', fancybox="True",
-               handletextpad=0, columnspacing=0)
-    plt.xlabel("X")
-    plt.ylabel("Y")    
-    
-    # Set axes to INDEX SPACE
-    GRID_SIZE = bacteria_grid.shape[0]
+    # How many past frames to show in trail (e.g. last 100 frames)
+    TRAIL_LENGTH = 100
+
+    for worm_key, worm_vals in worms.items():
+        if frame_i >= len(worm_vals['x']):
+            continue
+
+        color = worm_colors[int(worm_key) % len(worm_colors)]
+
+        # --- trail: past positions as faint dots ---
+        trail_start = max(0, frame_i - TRAIL_LENGTH)
+        trail_x = worm_vals['x'][trail_start:frame_i]
+        trail_y = worm_vals['y'][trail_start:frame_i]
+
+        if len(trail_x) > 0:
+            # Fade trail opacity from 0 (oldest) to 0.4 (most recent)
+            n_trail = len(trail_x)
+            for t_i in range(n_trail):
+                alpha_trail = 0.05 + 0.35 * (t_i / max(n_trail - 1, 1))
+                plt.scatter(
+                    convert_xy_to_index(trail_x[t_i]),
+                    convert_xy_to_index(trail_y[t_i]),
+                    color=color, s=5,                  # small trail dots
+                    alpha=alpha_trail,
+                    edgecolors='none', zorder=5
+                )
+
+        # --- current worm position ---
+        plt.scatter(
+            convert_xy_to_index(worm_vals['x'][frame_i]),
+            convert_xy_to_index(worm_vals['y'][frame_i]),
+            color=color, s=30,                         # reduced from 100
+            edgecolors='black', linewidths=0.5,
+            zorder=10
+        )
+
+    # --- formatting ---
+    GRID_SIZE = bacteria_history[0].shape[0] if len(bacteria_history) > 0 else 301
     plt.xlim(0, GRID_SIZE)
     plt.ylim(0, GRID_SIZE)
+    plt.xlabel("X (cm)")
+    plt.ylabel("Y (cm)")
 
-    # Title
-    N = script_config['num_worms']
-    dx_value = f"{script_config.get('dx', 0):.3f}".rstrip('0').rstrip('.')
-    dt_value = f"{script_config.get('dt', 0):.10f}".rstrip('0').rstrip('.')
-    g_A      = script_config.get('g_A',   'N/A')
-    g_rho    = script_config.get('g_rho', 'N/A')
-    title = f"Worms: {int(N)} -- dx: {dx_value} -- dt: {dt_value} -- g_A: {g_A:.2e} -- g_rho: {g_rho:.2e}"
-    plt.title(f"{title} \n t: {frame_i}/{total_frames}")
+    # Tick labels in cm instead of grid indices
+    n_ticks  = 7
+    x_min    = script_config['x_min']
+    x_max    = script_config['x_max']
+    tick_idx = np.linspace(0, GRID_SIZE, n_ticks)
+    tick_lbl = [f"{v:.1f}" for v in np.linspace(x_min, x_max, n_ticks)]
+    plt.xticks(tick_idx, tick_lbl, fontsize=7)
+    plt.yticks(tick_idx, tick_lbl, fontsize=7)
 
-    # Save frames
-    file_path = f't{frame_i:04d}.png'
-    filename = f'{MOVIE_FRAME_PATH}/{file_path}'
+    N      = script_config['num_worms']
+    dx_val = f"{script_config.get('dx', 0):.3f}".rstrip('0').rstrip('.')
+    dt_val = f"{script_config.get('dt', 0):.10f}".rstrip('0').rstrip('.')
+    g_A    = script_config.get('g_A',   'N/A')
+    g_rho  = script_config.get('g_rho', 'N/A')
+    title  = (f"Worms: {int(N)} -- dx: {dx_val} -- dt: {dt_val} "
+              f"-- g_A: {g_A:.2e} -- g_rho: {g_rho:.2e}")
+    plt.title(f"{title}\nt: {frame_i}/{total_frames}")
+
+    filename = f'{MOVIE_FRAME_PATH}/t{frame_i:04d}.png'
     plt.savefig(filename, bbox_inches='tight', dpi=150)
     plt.close()
 
