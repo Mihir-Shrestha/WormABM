@@ -20,6 +20,9 @@ config_opts = {
     # K_A is computed automatically in Environment as (x_max - x_min)^2 = 9 cm^2
     "A_B_0" : 0.7854,            # initial patch area = pi * 0.5^2 cm^2
     "rho_0" : 1.27e8,            # initial density (cells/cm^2)
+    "boundary_k" : [10],   # cm^-1  boundary sharpness
+                            # large (e.g. 100) = sharp ring
+                            # small (e.g. 2)   = wide sensing range
 
     # Worm SDE motility parameters
     "num_worms" : 10,

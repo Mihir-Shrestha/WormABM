@@ -65,15 +65,32 @@ class Environment:
         self.__init_bacteria_patch()
 
     def __init_bacteria_patch(self):
+        # """
+        # Paint the circular patch onto the grid.
+        # Radius is derived from current A_B: r = sqrt(A_B / pi)
+        # Cells inside the circle get value rho, everything outside is 0.
+        # Patch is always centred at (0, 0).
+        # """
+        # r    = np.sqrt(self.A_B / np.pi)               # current radius (cm)
+        # dist = np.sqrt(self.x_grid**2 + self.y_grid**2)
+        # self.bacteria_map = np.where(dist <= r, self.rho, 0.0)
         """
-        Paint the circular patch onto the grid.
-        Radius is derived from current A_B: r = sqrt(A_B / pi)
-        Cells inside the circle get value rho, everything outside is 0.
-        Patch is always centred at (0, 0).
+        Paint the circular patch onto the grid with a sigmoid falloff at the boundary.
+        
+        b(r) = rho / (1 + exp(k * (r - R)))
+        
+        where:
+            R = current patch radius (cm)
+            k = sharpness of boundary (cm^-1)
+                large k -> sharp edge (current behaviour)
+                small k -> smooth falloff, worms sense gradient from distance
         """
-        r    = np.sqrt(self.A_B / np.pi)               # current radius (cm)
+        R    = np.sqrt(self.A_B / np.pi)               # current patch radius (cm)
         dist = np.sqrt(self.x_grid**2 + self.y_grid**2)
-        self.bacteria_map = np.where(dist <= r, self.rho, 0.0)
+
+        # Sigmoid falloff — k controls sensing range
+        k = getattr(self, "boundary_k")          # cm^-1, tunable parameter
+        self.bacteria_map = self.rho / (1.0 + np.exp(k * (dist - R)))
 
     def __logistic_step(self, x, g, K):
         """

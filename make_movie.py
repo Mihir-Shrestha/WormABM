@@ -81,25 +81,54 @@ def process_data(env_path, worm_path):
 
     return worms, bacteria_history
 
-def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_config, convert_xy_to_index, total_frames):  
+def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_config, convert_xy_to_index, total_frames, show_gradient):  
     """Plot a single frame of the simulation including worms and bacteria concentration"""
-    # Plot bacteria concentration map with gradient
+
+    # Fixed figure size — must be identical every frame so cv2 can stack them
+    fig = plt.figure(figsize=(8, 7))
+
     if len(bacteria_history) > frame_i:
-        bacteria_grid = bacteria_history[frame_i]
-        
-        # Mask zeros so background stays white, not dark green
-        bacteria_masked = np.ma.masked_where(bacteria_grid == 0, bacteria_grid)
+        bacteria_grid = bacteria_history[frame_i].copy()
 
-        # Get min/max for color scaling
-        min_b = script_config.get('rho_0', 1.27e8) * 0.85  # Slightly below initial density
-        max_b = script_config.get('K_rho', 4.58e8)
+        if show_gradient:
+            # Compute gradient magnitude of the normalised density field
+            K_rho      = script_config.get('K_rho', 4.58e8)
+            b_norm     = bacteria_grid / K_rho                      # normalise to [0, 1]
+            dx = script_config.get('dx', 0.01)
 
-        im = plt.imshow(bacteria_grid, cmap='Greens', vmin=min_b, vmax=max_b, 
-                        origin='upper', alpha=0.8, interpolation='bilinear')
-        
-        # Add colorbar to show concentration scale
-        clb = plt.colorbar(im, shrink=0.8, format='%.2e')
-        clb.ax.set_title('Density\ncells/cm²', fontsize=7)
+            grad_y, grad_x = np.gradient(b_norm, dx)               # both in cm^-1
+            grad_mag   = np.sqrt(grad_x**2 + grad_y**2)            # magnitude |∇b_norm|
+
+            # Mask zeros so background stays white
+            grad_masked = np.ma.masked_where(grad_mag == 0, grad_mag)
+            # Mask near-zero values (inside and outside patch)
+            # Use a small threshold instead of == 0 to catch floating point near-zeros
+            # grad_masked = np.ma.masked_where(grad_mag < 1e-6, grad_mag)
+
+            cmap = plt.cm.Greens.copy()                                
+            cmap.set_bad(color='black')
+
+            im = plt.imshow(grad_masked, cmap=cmap,
+                            origin='upper', alpha=0.9,
+                            interpolation='nearest')
+
+            clb = plt.colorbar(im, shrink=0.8, format='%.2e')
+            clb.ax.set_title('|∇b|\n(cm⁻¹)', fontsize=7)
+
+        else:
+            # --- default: show density ---
+            bacteria_masked = np.ma.masked_where(bacteria_grid == 0, bacteria_grid)
+            min_b = script_config.get('rho_0', 1.27e8)
+            max_b = script_config.get('K_rho', 4.58e8)
+
+            cmap = plt.cm.Greens.copy()
+            cmap.set_bad(color='white')
+
+            im = plt.imshow(bacteria_masked, cmap=cmap, vmin=min_b, vmax=max_b,
+                            origin='upper', alpha=0.8, interpolation='bilinear')
+
+            clb = plt.colorbar(im, shrink=0.8, format='%.2e')
+            clb.ax.set_title('Density\n(cells/cm²)', fontsize=7)
 
     # --- worms and trails ---
     num_worms  = len(worms)
@@ -160,14 +189,12 @@ def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_co
     N      = script_config['num_worms']
     dx_val = f"{script_config.get('dx', 0):.3f}".rstrip('0').rstrip('.')
     dt_val = f"{script_config.get('dt', 0):.10f}".rstrip('0').rstrip('.')
-    g_A    = script_config.get('g_A',   'N/A')
-    g_rho  = script_config.get('g_rho', 'N/A')
     title  = (f"Worms: {int(N)} -- dx: {dx_val} -- dt: {dt_val} "
-              f"-- g_A: {g_A:.2e} -- g_rho: {g_rho:.2e}")
+              f"-- k: {script_config.get('boundary_k')}")
     plt.title(f"{title}\nt: {frame_i}/{total_frames}")
 
     filename = f'{MOVIE_FRAME_PATH}/t{frame_i:04d}.png'
-    plt.savefig(filename, bbox_inches='tight', dpi=150)
+    plt.savefig(filename, dpi=150)
     plt.close()
 
 def setup_opts():
@@ -177,9 +204,10 @@ def setup_opts():
     parser.add_argument('-r', '--fps', type=int, default=5, help='FPS for output movie')
     parser.add_argument('-s', '--stepsize', type=int, default=1, help='Step size for plotting data')
     parser.add_argument('-a', '--all', action='store_true', help='Plot all experiments in the experiments/ folder')
+    parser.add_argument('-sg', '--show_gradient', action='store_true', help="Visualize gradient magnitude(|∇b|) instead of density")
     return parser.parse_args()
 
-def main(exp_path, fps, stepsize):
+def main(exp_path, fps, stepsize, show_gradient):
     """Main function to generate movie frames and compile them into a video"""
     # Obtain parameters from config
     script_config = read_config(exp_path)
@@ -209,13 +237,13 @@ def main(exp_path, fps, stepsize):
             sys.stdout.write(f"\rMaking frame {frame_i}/{total_frames-1}")
             sys.stdout.flush()
 
-            plot_frame(frame_i, worms, bacteria_sources, legend_colors, texts, script_config, convert_xy_to_index, total_frames)
+            plot_frame(frame_i, worms, bacteria_sources, legend_colors, texts, script_config, convert_xy_to_index, total_frames, show_gradient)
     
     # Last frame
     frame_i = total_frames - 1
     sys.stdout.write(f"\rMaking frame {frame_i}/{total_frames-1}")
     sys.stdout.flush()
-    plot_frame(frame_i, worms, bacteria_sources, legend_colors, texts, script_config, convert_xy_to_index, total_frames)
+    plot_frame(frame_i, worms, bacteria_sources, legend_colors, texts, script_config, convert_xy_to_index, total_frames, show_gradient)
 
     # Stitching frames together to create video
     all_img_paths = np.sort(glob2.glob(f"{MOVIE_FRAME_PATH}/*.png"))
@@ -229,6 +257,7 @@ if __name__ == '__main__':
 
     FPS = opts.fps
     INTERVAL = opts.stepsize
+    SHOW_GRADIENT = opts.show_gradient
 
     print("\n---------- Visualizing worm model data ----------")
     
@@ -280,7 +309,7 @@ if __name__ == '__main__':
             os.makedirs(MOVIE_FRAME_PATH, exist_ok=True)
             
             try:
-                main(BASE_EXPERIMENT_DIR, FPS, INTERVAL)
+                main(BASE_EXPERIMENT_DIR, FPS, INTERVAL, SHOW_GRADIENT)
                 print(f"\n✓ Completed: {exp_folder}")
             except Exception as e:
                 print(f"\n✗ Error processing {exp_folder}: {e}")
@@ -309,6 +338,6 @@ if __name__ == '__main__':
         
         print(f"Processing: {BASE_EXPERIMENT_DIR}\n")
         
-        main(BASE_EXPERIMENT_DIR, FPS, INTERVAL)
+        main(BASE_EXPERIMENT_DIR, FPS, INTERVAL, SHOW_GRADIENT)
     
     print("\nDone!\n")

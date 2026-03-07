@@ -40,6 +40,7 @@ def config_options():
     parser.add_argument("--K_rho", type=float, default=4.58e8)         # density carrying capacity (cells/cm^2)
     parser.add_argument("--A_B_0", type=float, default=np.pi * 0.5**2)  # initial patch area = pi * 0.5^2 cm^2
     parser.add_argument("--rho_0", type=float, default=1.27e8)          # initial density (cells/cm^2)
+    parser.add_argument("--boundary_k", type=float, default=10.0)      # Boundary sharpness (cm^-1). Large (e.g. 100) = sharp ring, small (e.g. 2) = wide sensing range
 
     # Worm parameters
     parser.add_argument("--num_worms", type=int, default=1)
@@ -80,7 +81,7 @@ def directory(config):
     seed = config.random_seed
     dx_value = f"{config.dx:.3f}".rstrip('0').rstrip('.')
     dt_value = f"{config.dt:.10f}".rstrip('0').rstrip('.')
-    params_name = f"N{N}_dx{dx_value}_dt{dt_value}_gA{config.g_A:.1e}_gRho{config.g_rho:.1e}"
+    params_name = f"N{N}_dx{dx_value}_dt{dt_value}_k{config.boundary_k}"
     model_dir = os.path.join(config.base_dir, params_name)
 
     os.makedirs(model_dir, exist_ok=True)
@@ -113,6 +114,7 @@ def world_parameters(cfg, model_dir):
         "K_rho": cfg.K_rho,
         "A_B_0": cfg.A_B_0,
         "rho_0": cfg.rho_0,
+        "boundary_k": cfg.boundary_k,
     }
 
     worm_params = {
