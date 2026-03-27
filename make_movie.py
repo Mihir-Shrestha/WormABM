@@ -189,11 +189,13 @@ def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_co
     N      = script_config['num_worms']
     dx_val = f"{script_config.get('dx', 0):.3f}".rstrip('0').rstrip('.')
     dt_val = f"{script_config.get('dt', 0):.10f}".rstrip('0').rstrip('.')
+    vmax_val = f"{script_config.get('v_max', 0):.2f}".rstrip('0').rstrip('.')
+    vmin_val = f"{script_config.get('v_min', 0):.2f}".rstrip('0').rstrip('.')
     title  = (f"Worms: {int(N)} -- dx: {dx_val} -- dt: {dt_val} "
-              f"-- k: {script_config.get('boundary_k')}")
+              f"-- k: {script_config.get('boundary_k')} -- R: {script_config.get('R')} -- vmax: {vmax_val} -- vmin: {vmin_val}")
     plt.title(f"{title}\nt: {frame_i}/{total_frames}")
 
-    filename = f'{MOVIE_FRAME_PATH}/t{frame_i:04d}.png'
+    filename = f'{MOVIE_FRAME_PATH}/t{frame_i:05d}.png'
     plt.savefig(filename, dpi=150)
     plt.close()
 

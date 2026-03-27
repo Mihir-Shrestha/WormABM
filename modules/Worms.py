@@ -100,14 +100,63 @@ class Worm(object):
         return b_norm, grad_bn
     
     def __check_arena_boundary(self, environment, new_x, new_y):
+        # """
+        # Keep worm inside arena. If proposed move exits boundary, 
+        # stay at current position (wall absorption).
+        # Returns valid (x, y).
+        # """
+        # x = np.clip(new_x, environment.x_min, environment.x_max)
+        # y = np.clip(new_y, environment.x_min, environment.x_max)
+        # return x, y
+        
+        # """
+        # Keep worm inside circular arena of radius R centered at origin.
+        # If proposed move exits boundary, clamp to the boundary circle.
+        # """
+        # R = environment.R
+        # dist = np.sqrt(new_x**2 + new_y**2)
+        # if dist > R:
+        #     # project back onto circle boundary
+        #     scale = R / dist
+        #     new_x = new_x * scale
+        #     new_y = new_y * scale
+        # return new_x, new_y
+        
         """
-        Keep worm inside arena. If proposed move exits boundary, 
-        stay at current position (wall absorption).
-        Returns valid (x, y).
+        Reflective circular boundary of radius R.
+        If the proposed position exits the circle, reflect the velocity
+        vector off the normal at the boundary, and flip heading accordingly.
         """
-        x = np.clip(new_x, environment.x_min, environment.x_max)
-        y = np.clip(new_y, environment.x_min, environment.x_max)
-        return x, y
+        R = environment.R
+        dist = np.sqrt(new_x**2 + new_y**2)
+
+        if dist > R:
+            # --- reflect position ---
+            # normal at boundary point (pointing inward)
+            nx = new_x / dist
+            ny = new_y / dist
+
+            # reflect position back inside
+            new_x = new_x - 2 * (dist - R) * nx
+            new_y = new_y - 2 * (dist - R) * ny
+
+            # clamp in case of floating point overshoot
+            dist2 = np.sqrt(new_x**2 + new_y**2)
+            if dist2 > R:
+                new_x = new_x * (R / dist2)
+                new_y = new_y * (R / dist2)
+
+            # --- reflect heading angle ---
+            # reflect theta off the inward normal
+            # inward normal angle
+            normal_angle = np.arctan2(-ny, -nx)
+            # angle of current heading relative to normal
+            incident = self.theta - normal_angle
+            # reflected heading
+            self.theta = normal_angle - incident
+
+        return new_x, new_y
+
     
     # ------------------------------------------------------------------
     # Public step
@@ -126,15 +175,25 @@ class Worm(object):
         # --- sample local field ---
         b_norm, grad_bn = self.__get_bacteria_and_gradient(environment)
 
+        # --- diagnostic suppression inside patch ---
+        suppress = getattr(self, "suppress_patch_chemotaxis", False)
+        on_patch = b_norm > 0.0
+
+        if suppress and on_patch:
+            # Force pure random walk: no gradient bias, no speed/noise suppression
+            b_norm  = 0.0               # v -> v_max, D_eff -> D_theta
+            grad_bn = np.zeros(2)       # no chemotactic turning
+
         # --- unit vectors from current angle ---
         u, u_perp = self.__unit_vectors(self.theta)
 
         # --- chemotactic turning (deterministic) ---
         proj       = np.dot(u_perp, grad_bn)            # scalar
         dtheta_det = self.chi_theta * proj * dt
+        D_theta = (self.dtheta ** 2) / (2.0 * environment.dt)
 
         # --- angular noise suppressed by bacteria (stochastic) ---
-        D_eff        = self.D_theta * np.exp(-self.beta_b * b_norm)
+        D_eff        = D_theta * np.exp(-self.beta_b * b_norm)
         dtheta_noise = np.sqrt(2.0 * D_eff * dt) * np.random.normal()
 
         # --- update angle ---

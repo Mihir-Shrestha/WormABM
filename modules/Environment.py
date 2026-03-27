@@ -45,21 +45,18 @@ class Environment:
         Initialise ODE state variables and build the first spatial map.
         A_B_0 = pi * 0.5^2 cm^2  (initial patch radius = 0.5 cm from paper)
         rho_0 = 1.27e8 cells/cm^2 (from Table S1)
-        K_A defaults to arena area = (x_max - x_min)^2 if not supplied.
         """
-        arena_side = self.x_max - self.x_min           # cm
-        # default_K_A = arena_side ** 2                   # cm^2 (square arena)
-        default_K_A = np.pi * 10**2      # cm^2 (circular arena inscribed in square)
 
         # ODE parameters (fall back to Table S1 values if not in params)
         self.g_A   = getattr(self, "g_A")           # min^-1
         self.g_rho = getattr(self, "g_rho")           # min^-1
-        self.K_A   = getattr(self, "K_A", default_K_A)       # cm^2
+        self.R = getattr(self, "R")              # cm, used for K_A
+        self.K_A   = np.pi * self.R**2           # cm^2, area carrying capacity (derived from plate radius)
         self.K_rho = getattr(self, "K_rho")            # cells/cm^2
 
         # Scalar ODE state variables
-        self.A_B = getattr(self, "A_B_0", np.pi * 0.5**2)      # cm^2
-        self.rho = getattr(self, "rho_0", 1.27e8)               # cells/cm^2
+        self.A_B = getattr(self, "A_B_0")      # cm^2
+        self.rho = getattr(self, "rho_0")               # cells/cm^2
 
         self.bacteria_map = np.zeros_like(self.x_grid, dtype=float)
         self.__init_bacteria_patch()
@@ -101,14 +98,45 @@ class Environment:
             return x
         exp_term = np.exp(-g * self.dt)
         return K * x / (x + (K - x) * exp_term)
-    
+
+    def feeding_rate(self):
+        A_B = self.A_B
+        rho = self.rho
+        R = self.R
+        
+        if A_B <= 0.0 or rho <= 0.0:
+            return 0.0
+        
+        c = getattr(self, "feed_c")  # Amplitude of Gaussian food source (cells/cm^2)
+        sigma = getattr(self, "feed_sigma")  # Width of Gaussian food source (cm)
+        psi = np.exp(-np.pi * R**2 / (sigma * A_B))
+        F = (c * psi * rho * A_B) / (1.0 + c * psi * rho * A_B)
+        return F
+
     def update_bacteria_map(self):
         """
         Advance A_B and rho by dt minutes using exact logistic solutions (S1, S2),
         then rebuild the spatial bacteria map.
         """
+        # 1) logistic growth
         self.A_B = self.__logistic_step(self.A_B, self.g_A,   self.K_A)
         self.rho = self.__logistic_step(self.rho,  self.g_rho, self.K_rho)
+        
+        # 2) total bacteria before feeding
+        B = self.A_B * self.rho
+
+        # 3) feeding term: N_worms * F(A_B, rho, R) * dt
+        N_worms = getattr(self, "num_worms")
+        dB_feed = self.feeding_rate() * N_worms * self.dt
+        B = max(B - dB_feed, 0.0) # Ensure non-negative bacteria count after feeding
+
+        # 4) update density from new total bacteria
+        if self.A_B > 0.0:
+            self.rho = B / self.A_B
+        else:
+            self.rho = 0.0
+
+        # 5) rebuild spatial map
         self.__init_bacteria_patch()
 
         # Debug print

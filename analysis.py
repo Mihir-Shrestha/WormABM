@@ -3,7 +3,7 @@ analysis.py  —  Standalone analysis plots using saved HDF5 data.
 
 Produces:
   1. single_worm_N_trail.png         — full rainbow trail of one worm over 4 days (no histogram)
-  2. multi_worm_Xh_analysis.png      — side-by-side: trajectory map + end-to-end histogram
+  2. multi_worm_Xh_analysis.png      — three panels: trajectory map + end-to-end histogram + MSD
 
 Usage:
     python analysis.py --exp_path experiments/N10_dx0.01_dt1_k10.0
@@ -108,24 +108,63 @@ def make_out_dir(exp_dir):
     Create and return output directory:
         WormABM/analysis/<exp_folder_name>/
     """
-    exp_name = os.path.basename(os.path.normpath(exp_dir))
-    # Walk up to WormABM root (parent of experiments/)
+    exp_name      = os.path.basename(os.path.normpath(exp_dir))
     worm_abm_root = os.path.dirname(os.path.abspath(__file__))
-    out_dir = os.path.join(worm_abm_root, "analysis", exp_name)
+    out_dir       = os.path.join(worm_abm_root, "analysis", exp_name)
     os.makedirs(out_dir, exist_ok=True)
     return out_dir
 
 
 # ===========================================================================
+#   MSD helper
+# ===========================================================================
+
+def compute_msd(x_cm, y_cm, t_min, max_lag_fraction=0.5):
+    """
+    Compute the time-averaged MSD for a single worm trajectory.
+
+        MSD(τ) = < |r(t+τ) - r(t)|² >_t
+
+    Uses every starting point t to average over, up to
+    max_lag_fraction * total_steps as the maximum lag.
+
+    Parameters
+    ----------
+    x_cm, y_cm      : position arrays in cm
+    t_min           : time array in minutes
+    max_lag_fraction: fraction of total length used as max lag (default 0.5)
+
+    Returns
+    -------
+    lag_times_min : 1-D array of lag times in minutes
+    msd_mm2       : 1-D array of MSD values in mm²
+    """
+    n          = len(x_cm)
+    max_lag    = max(1, int(n * max_lag_fraction))
+    dt_min     = float(t_min[1] - t_min[0]) if len(t_min) > 1 else 1.0
+
+    x_mm = x_cm * 10   # cm -> mm
+    y_mm = y_cm * 10
+
+    lag_times = np.arange(1, max_lag + 1) * dt_min   # minutes
+    msd       = np.zeros(max_lag)
+
+    for lag in range(1, max_lag + 1):
+        dx   = x_mm[lag:] - x_mm[:-lag]
+        dy   = y_mm[lag:] - y_mm[:-lag]
+        msd[lag - 1] = np.mean(dx**2 + dy**2)
+
+    return lag_times, msd
+
+
+# ===========================================================================
 #   Plot 1 — Single worm, full 4-day trail only  (no histogram)
-#   Fixed arena size so all worm plots are identical dimensions
-#   Legend placed outside the plot on the right
 # ===========================================================================
 
 def plot_single_worm_trail(exp_dir, worm_num=0, out_dir=None):
     """
     Full trajectory of one worm over 4 days:
-      - White background, fixed arena axes [-1.5, 1.5] cm (same size for all worms)
+      - White background, fixed arena axes (same size for all worms)
       - Trail coloured by time (blue=start -> red=end, rainbow cmap)
       - Dashed circle = final bacteria patch boundary
       - Colorbar and legend placed OUTSIDE the plot on the right
@@ -137,39 +176,34 @@ def plot_single_worm_trail(exp_dir, worm_num=0, out_dir=None):
         raise ValueError(f"Worm {worm_num} not found. Available: {list(worms.keys())}")
 
     worm = worms[worm_num]
-    x_mm = worm["x"] * 10      # cm -> mm
+    x_mm = worm["x"] * 10
     y_mm = worm["y"] * 10
-    t    = worm["t"]            # minutes
+    t    = worm["t"]
     days = t.max() / 60 / 24
 
     norm   = plt.Normalize(t.min(), t.max())
     cmap   = cm.rainbow
     colors = cmap(norm(t))
 
-    # Extra right margin for legend + colorbar outside the axes
     fig, ax = plt.subplots(figsize=(8, 7))
-    fig.subplots_adjust(right=0.72)     # leave 28% on right for legend/colorbar
+    fig.subplots_adjust(right=0.72)
     fig.patch.set_facecolor('white')
     ax.set_facecolor('white')
 
-    # Trail coloured by time
     for i in range(len(x_mm) - 1):
         ax.plot(x_mm[i:i+2], y_mm[i:i+2],
                 color=colors[i], linewidth=0.6, alpha=0.85)
 
-    # Start and end markers
     ax.scatter(x_mm[0],  y_mm[0],  color='blue', s=50, zorder=6,
                edgecolors='black', linewidths=0.5)
     ax.scatter(x_mm[-1], y_mm[-1], color='red',  s=50, marker='*',
                zorder=6, edgecolors='black', linewidths=0.5)
 
-    # Final patch boundary circle
     R_mm    = get_final_patch_radius(exp_dir) * 10
     theta_c = np.linspace(0, 2 * np.pi, 300)
     ax.plot(R_mm * np.cos(theta_c), R_mm * np.sin(theta_c),
             'k--', linewidth=1.2, alpha=0.7)
 
-    # Fixed arena limits — same for every worm
     ax.set_xlim(ARENA_MIN_MM, ARENA_MAX_MM)
     ax.set_ylim(ARENA_MIN_MM, ARENA_MAX_MM)
     ax.set_aspect("equal")
@@ -177,15 +211,13 @@ def plot_single_worm_trail(exp_dir, worm_num=0, out_dir=None):
     ax.set_ylabel("y (mm)", fontsize=12)
     ax.set_title(f"Worm {worm_num} — {days:.1f} day full trail", fontsize=13)
 
-    # Colorbar outside axes (right side)
     sm = cm.ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
-    cbar_ax = fig.add_axes([0.74, 0.15, 0.03, 0.55])   # [left, bottom, width, height]
+    cbar_ax = fig.add_axes([0.74, 0.15, 0.03, 0.55])
     cbar    = fig.colorbar(sm, cax=cbar_ax)
     cbar.set_label("Time (min)", fontsize=10)
     cbar.ax.tick_params(labelsize=8)
 
-    # Legend outside axes below colorbar
     legend_handles = [
         Line2D([0], [0], marker='o', color='w', markerfacecolor='blue',
                markersize=8, label='Start', markeredgecolor='black'),
@@ -195,8 +227,7 @@ def plot_single_worm_trail(exp_dir, worm_num=0, out_dir=None):
                label='Patch edge'),
     ]
     fig.legend(handles=legend_handles, fontsize=9,
-               loc='center right',
-               bbox_to_anchor=(1.0, 0.82),
+               loc='center right', bbox_to_anchor=(1.0, 0.82),
                framealpha=0.8)
 
     out_path = os.path.join(out_dir, f"single_worm_{worm_num}_trail.png")
@@ -206,16 +237,15 @@ def plot_single_worm_trail(exp_dir, worm_num=0, out_dir=None):
 
 
 # ===========================================================================
-#   Plot 2 — Multi-worm analysis: trajectory map  +  end-to-end histogram
-#   Legend outside trajectory axes, no trail clipping
+#   Plot 2 — Three-panel: trajectory map + end-to-end histogram + MSD
 # ===========================================================================
 
 def plot_multi_worm_trajectories(exp_dir, hours=4, out_dir=None):
     """
-    Side-by-side figure:
-      Left  — all worm trails, white background, green bacteria patch
-              legend placed OUTSIDE below the axes
-      Right — end-to-end distance histogram for all worms combined
+    Three-panel figure:
+      Left   — all worm trails on white background with green bacteria patch
+      Centre — end-to-end distance histogram for all worms combined
+      Right  — MSD log-log plot per worm + ensemble mean, with slope=1 and slope=2 guides
     """
     cfg     = read_config(exp_dir)
     worms   = load_worm_data(exp_dir)
@@ -232,12 +262,11 @@ def plot_multi_worm_trajectories(exp_dir, hours=4, out_dir=None):
     num_worms   = len(worms)
     worm_colors = cm.tab10(np.linspace(0, 1, max(num_worms, 1)))
 
-    # Extra bottom margin for legend below trajectory axes
-    fig, (ax_traj, ax_hist) = plt.subplots(
-        1, 2, figsize=(17, 8),
-        gridspec_kw={"width_ratios": [1, 1]}
+    fig, (ax_traj, ax_hist, ax_msd) = plt.subplots(
+        1, 3, figsize=(24, 8),
+        gridspec_kw={"width_ratios": [1, 1, 1]}
     )
-    fig.subplots_adjust(bottom=0.22, wspace=0.3)
+    fig.subplots_adjust(bottom=0.22, wspace=0.35)
     fig.patch.set_facecolor('white')
 
     # ── LEFT: trajectory map ───────────────────────────────────────────────
@@ -253,34 +282,40 @@ def plot_multi_worm_trajectories(exp_dir, hours=4, out_dir=None):
                    extent=[x_min, x_max, x_min, x_max],
                    aspect='equal')
 
-    all_end_to_end = []
+    all_end_to_end  = []
+    all_msd_arrays  = []       # list of (lag_times, msd) per worm
     worm_legend_handles = []
 
     for worm_num, worm in worms.items():
         x_cm = worm["x"][:steps]
         y_cm = worm["y"][:steps]
+        t_w  = worm["t"][:steps]
         color = worm_colors[int(worm_num) % len(worm_colors)]
 
-        ax_traj.plot(x_cm, y_cm, color=color, linewidth=0.9, alpha=0.85,
-                     clip_on=False)     # clip_on=False prevents edge cutting
-
-        # Start: circle
-        ax_traj.scatter(x_cm[0], y_cm[0], color=color, s=35,
-                        edgecolors='black', linewidths=0.5, zorder=6,
-                        clip_on=False)
-        # End: star
+        # --- trajectory ---
+        ax_traj.plot(x_cm, y_cm, color=color, linewidth=0.9,
+                     alpha=0.85, clip_on=False)
+        ax_traj.scatter(x_cm[0],  y_cm[0],  color=color, s=35,
+                        edgecolors='black', linewidths=0.5,
+                        zorder=6, clip_on=False)
         ax_traj.scatter(x_cm[-1], y_cm[-1], color=color, s=70,
                         marker='*', edgecolors='black', linewidths=0.4,
                         zorder=7, clip_on=False)
 
         worm_legend_handles.append(
-            Line2D([0], [0], color=color, linewidth=1.5, label=f"Worm {worm_num}")
+            Line2D([0], [0], color=color, linewidth=1.5,
+                   label=f"Worm {worm_num}")
         )
 
+        # --- end-to-end ---
         x_mm = x_cm * 10
         y_mm = y_cm * 10
         end_to_end = np.sqrt((x_mm - x_mm[0])**2 + (y_mm - y_mm[0])**2)
         all_end_to_end.extend(end_to_end.tolist())
+
+        # --- MSD per worm ---
+        lag_times, msd = compute_msd(x_cm, y_cm, t_w, max_lag_fraction=0.5)
+        all_msd_arrays.append((lag_times, msd, color, worm_num))
 
     # Marker legend entries
     marker_handles = [
@@ -292,31 +327,25 @@ def plot_multi_worm_trajectories(exp_dir, hours=4, out_dir=None):
                markeredgecolor='black'),
     ]
 
-    # Legend BELOW the trajectory axes
     ax_traj.legend(
         handles=worm_legend_handles + marker_handles,
-        fontsize=7,
-        loc='upper center',
-        bbox_to_anchor=(0.5, -0.12),    # below axes
-        ncol=6,
-        framealpha=0.85,
-        borderaxespad=0.
+        fontsize=7, loc='upper center',
+        bbox_to_anchor=(0.5, -0.12),
+        ncol=6, framealpha=0.85, borderaxespad=0.
     )
 
-    # Fixed arena limits — no clipping
     ax_traj.set_xlim(x_min, x_max)
     ax_traj.set_ylim(x_min, x_max)
     ax_traj.set_xlabel("x (cm)", fontsize=12)
     ax_traj.set_ylabel("y (cm)", fontsize=12)
     ax_traj.set_title(f"{num_worms} worms — {hours}h trajectories", fontsize=13)
 
-    # ── RIGHT: end-to-end histogram ───────────────────────────────────────
+    # ── CENTRE: end-to-end histogram ──────────────────────────────────────
     ax_hist.set_facecolor('white')
     all_end_to_end = np.array(all_end_to_end)
 
     ax_hist.hist(all_end_to_end, bins=60, color='steelblue',
                  edgecolor='steelblue', density=True, alpha=1.0)
-
     ax_hist.set_xlabel("End-to-end distance (mm)", fontsize=12)
     ax_hist.set_ylabel("Probability density",      fontsize=12)
     ax_hist.set_title(f"End-to-end distance — all {num_worms} worms\n"
@@ -327,14 +356,71 @@ def plot_multi_worm_trajectories(exp_dir, hours=4, out_dir=None):
         color='steelblue',
         label=f"All worms combined\n(n={len(all_end_to_end)} measurements)"
     )
-    # Histogram legend outside below — matching trajectory axes
     ax_hist.legend(
-        handles=[hist_patch],
-        fontsize=9,
-        loc='upper center',
+        handles=[hist_patch], fontsize=9,
+        loc='upper center', bbox_to_anchor=(0.5, -0.12),
+        framealpha=0.85, borderaxespad=0.
+    )
+
+    # ── RIGHT: MSD log-log ────────────────────────────────────────────────
+    ax_msd.set_facecolor('white')
+
+    # Plot each worm's MSD in its colour (thin, alpha)
+    for lag_times, msd, color, worm_num in all_msd_arrays:
+        ax_msd.loglog(lag_times, msd, color=color,
+                      linewidth=0.8, alpha=0.5)
+
+    # Ensemble mean MSD across all worms
+    # Interpolate all to the common shortest lag_time array
+    min_len    = min(len(lt) for lt, _, _, _ in all_msd_arrays)
+    ref_lags   = all_msd_arrays[0][0][:min_len]
+    msd_stack  = np.array([msd[:min_len] for _, msd, _, _ in all_msd_arrays])
+    mean_msd   = np.mean(msd_stack, axis=0)
+
+    ax_msd.loglog(ref_lags, mean_msd,
+                  color='black', linewidth=2.5,
+                  label='Ensemble mean', zorder=5)
+
+    # Reference slope lines anchored near the mean MSD
+    # Find a good anchor point (10% into the lag range)
+    anchor_idx  = max(1, min_len // 10)
+    anchor_lag  = ref_lags[anchor_idx]
+    anchor_msd  = mean_msd[anchor_idx]
+
+    lags_ref    = np.array([ref_lags[0], ref_lags[-1]])
+
+    slope1 = anchor_msd * (lags_ref / anchor_lag) ** 1   # diffusive
+    slope2 = anchor_msd * (lags_ref / anchor_lag) ** 2   # ballistic
+
+    ax_msd.loglog(lags_ref, slope1, 'k--', linewidth=1.2,
+                  label='slope = 1 (diffusive)')
+    ax_msd.loglog(lags_ref, slope2, 'k:',  linewidth=1.2,
+                  label='slope = 2 (ballistic)')
+
+    ax_msd.set_xlabel("Time lag (min)",          fontsize=12)
+    ax_msd.set_ylabel("MSD (mm²)",               fontsize=12)
+    ax_msd.set_title(f"Mean Squared Displacement\n({hours}h window)", fontsize=13)
+
+    # Per-worm colour entries for MSD legend
+    msd_worm_handles = [
+        Line2D([0], [0], color=worm_colors[int(wn) % len(worm_colors)],
+               linewidth=1.0, alpha=0.6, label=f"Worm {wn}")
+        for _, _, _, wn in all_msd_arrays
+    ]
+    msd_ref_handles = [
+        Line2D([0], [0], color='black', linewidth=2.5,
+               label='Ensemble mean'),
+        Line2D([0], [0], color='black', linewidth=1.2,
+               linestyle='--', label='slope = 1 (diffusive)'),
+        Line2D([0], [0], color='black', linewidth=1.2,
+               linestyle=':',  label='slope = 2 (ballistic)'),
+    ]
+
+    ax_msd.legend(
+        handles=msd_worm_handles + msd_ref_handles,
+        fontsize=7, loc='upper center',
         bbox_to_anchor=(0.5, -0.12),
-        framealpha=0.85,
-        borderaxespad=0.
+        ncol=4, framealpha=0.85, borderaxespad=0.
     )
 
     out_path = os.path.join(out_dir, f"multi_worm_{int(hours)}h_analysis.png")
@@ -370,8 +456,8 @@ if __name__ == "__main__":
     print(f"Output   : {out_dir}")
     print(f"{'='*60}\n")
 
-    # Multi-worm side-by-side (always produced)
-    print(f"Plotting {opts.hours}h multi-worm analysis...")
+    # Three-panel multi-worm plot (always produced)
+    print(f"Plotting {opts.hours}h multi-worm analysis (trajectory + end-to-end + MSD)...")
     plot_multi_worm_trajectories(exp_dir, hours=opts.hours, out_dir=out_dir)
 
     # Single worm full trail

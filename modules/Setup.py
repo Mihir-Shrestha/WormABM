@@ -26,30 +26,33 @@ def config_options():
     parser.add_argument("--measurements_on", type=bool, default=True)
 
     # Environment parameters
-    parser.add_argument("--x_min", type=float, default=-1.5)
-    parser.add_argument("--x_max", type=float, default=1.5)
-    parser.add_argument("--dx", type=float, default=0.01)
-    parser.add_argument("--t_min", type=float, default=0)
-    parser.add_argument("--t_max", type=float, default=6000)
-    parser.add_argument("--dt", type=float, default=1)\
+    parser.add_argument("--x_min", type=float)
+    parser.add_argument("--x_max", type=float)
+    parser.add_argument("--dx", type=float)
+    parser.add_argument("--t_min", type=float)
+    parser.add_argument("--t_max", type=float)
+    parser.add_argument("--dt", type=float)\
     
     # ODE parameters (defaults from Table S1)
-    parser.add_argument("--g_A", type=float, default=1.13e-4)           # area growth rate (min^-1)
-    parser.add_argument("--g_rho", type=float, default=1.07e-3)         # density growth rate (min^-1)
-    parser.add_argument("--K_A", type=float, default=9.0)              # area carrying capacity (cm^2)
-    parser.add_argument("--K_rho", type=float, default=4.58e8)         # density carrying capacity (cells/cm^2)
-    parser.add_argument("--A_B_0", type=float, default=np.pi * 0.5**2)  # initial patch area = pi * 0.5^2 cm^2
-    parser.add_argument("--rho_0", type=float, default=1.27e8)          # initial density (cells/cm^2)
-    parser.add_argument("--boundary_k", type=float, default=10.0)      # Boundary sharpness (cm^-1). Large (e.g. 100) = sharp ring, small (e.g. 2) = wide sensing range
+    parser.add_argument("--g_A", type=float)           # area growth rate (min^-1)
+    parser.add_argument("--g_rho", type=float)         # density growth rate (min^-1)
+    # parser.add_argument("--K_A", type=float, default=np.pi*2*2)              # area carrying capacity (cm^2)
+    parser.add_argument("--R", type=float)              # plate radius used for K_A and naming only
+    parser.add_argument("--K_rho", type=float)         # density carrying capacity (cells/cm^2)
+    parser.add_argument("--A_B_0", type=float)  # initial patch area = pi * 0.5^2 cm^2
+    parser.add_argument("--rho_0", type=float)          # initial density (cells/cm^2)
+    parser.add_argument("--boundary_k", type=float)      # Boundary sharpness (cm^-1). Large (e.g. 100) = sharp ring, small (e.g. 2) = wide sensing range
+    parser.add_argument("--feed_c", type=float)          # Amplitude of Gaussian food source (cells/cm^2). 0 means no food source.
+    parser.add_argument("--feed_sigma", type=float)      # Width of Gaussian food source (
 
     # Worm parameters
-    parser.add_argument("--num_worms", type=int, default=1)
-    parser.add_argument("--v_max", type=float, default=0.02)                            # speed at low bacterial density (exploring)
-    parser.add_argument("--v_min", type=float, default=0.001)                           # speed at high bacterial density (dwelling)
-    parser.add_argument("--alpha", type=float, default=4.0)                             # how strongly speed decreases with bacterial density
-    parser.add_argument("--beta_b", type=float, default=4.0)                            # how strongly bacterial density suppresses speed
-    parser.add_argument("--chi_theta", type=float, default=6.0)                         # chemotactic turning sensitivity
-    parser.add_argument("--D_theta", type=float, default=(np.pi/8)**2 / 2.0)           # max rotational diffusion (at b=0)
+    parser.add_argument("--num_worms", type=int)
+    parser.add_argument("--v_max", type=float)                            # speed at low bacterial density (exploring)
+    parser.add_argument("--v_min", type=float)                           # speed at high bacterial density (dwelling)
+    parser.add_argument("--alpha", type=float)                             # how strongly speed decreases with bacterial density
+    parser.add_argument("--beta_b", type=float)                            # how strongly bacterial density suppresses speed
+    parser.add_argument("--chi_theta", type=float)                         # chemotactic turning sensitivity
+    parser.add_argument("--dtheta", type=float)           # max rotational diffusion (at b=0)
 
     # Bacteria drop parameters
     # parser.add_argument("--bacteria_enabled", type=bool, default=False)
@@ -69,8 +72,6 @@ def config_options():
 
 def directory(config):
     # Create experiment directory and copy config file
-    # timestamp = datetime.now().strftime("%m-%d-%y_%H-%M-%S")
-
     if not hasattr(config, 'config_file'):
         cfg_name = 'test'
     else:
@@ -78,10 +79,14 @@ def directory(config):
 
     # Create folder name with parameters
     N = config.num_worms
-    seed = config.random_seed
+    # seed = config.random_seed
     dx_value = f"{config.dx:.3f}".rstrip('0').rstrip('.')
     dt_value = f"{config.dt:.10f}".rstrip('0').rstrip('.')
-    params_name = f"N{N}_dx{dx_value}_dt{dt_value}_k{config.boundary_k}"
+    R_value = f"{config.R:.2f}".rstrip('0').rstrip('.')
+    vmax_value = f"{config.v_max:.2f}".rstrip('0').rstrip('.')
+    vmin_value = f"{config.v_min:.2f}".rstrip('0').rstrip('.')
+    total_time = f"{config.t_max:.1f}".rstrip('0').rstrip('.')
+    params_name = f"N{N}_dx{dx_value}_dt{dt_value}_k{config.boundary_k}_R{R_value}_vmax{vmax_value}_vmin{vmin_value}_T{total_time}"
     model_dir = os.path.join(config.base_dir, params_name)
 
     os.makedirs(model_dir, exist_ok=True)
@@ -110,11 +115,15 @@ def world_parameters(cfg, model_dir):
         "dt": cfg.dt,
         "g_A": cfg.g_A,
         "g_rho": cfg.g_rho,
-        "K_A": cfg.K_A,
+        # "K_A": cfg.K_A,
+        "R": cfg.R,
         "K_rho": cfg.K_rho,
         "A_B_0": cfg.A_B_0,
         "rho_0": cfg.rho_0,
         "boundary_k": cfg.boundary_k,
+        "num_worms": cfg.num_worms,
+        "feed_c": cfg.feed_c,
+        "feed_sigma": cfg.feed_sigma
     }
 
     worm_params = {
@@ -125,7 +134,7 @@ def world_parameters(cfg, model_dir):
         "alpha": cfg.alpha,
         "beta_b": cfg.beta_b,
         "chi_theta": cfg.chi_theta,
-        "D_theta": cfg.D_theta,
+        "dtheta": cfg.dtheta,
         # Bacteria dropping parameters
         "bacteria_enabled": cfg.bacteria_enabled,
         "bacteria_drop_interval": cfg.bacteria_drop_interval,
@@ -140,90 +149,85 @@ def world_parameters(cfg, model_dir):
 
     return world_params
 
-def convert_index_to_xy(idx, idx_min=0, idx_max=300, xy_min=-1.5, xy_max=1.5):
+def convert_index_to_xy(idx, idx_min, idx_max, xy_min, xy_max):
     # Convert grid index to real-world coordinate
     xy = np.interp(idx, [idx_min, idx_max], [xy_min, xy_max])
     return xy
 
-def generate_points_with_min_distance(num_worms, shape, min_dist):
-    """Generate initial positions for worms ensuring minimum distance between them"""
-
-    # Handle edge case: single worm
+def generate_points_with_min_distance(num_worms, R, min_dist):
+    """
+    Generate initial worm positions uniformly inside circular arena of radius R,
+    with a minimum distance between worms.
+    Works in real (cm) coordinates directly — no index space needed.
+    """
     if num_worms <= 1:
-        center_x = shape[1] / 2
-        center_y = shape[0] / 2
-        return np.array([[center_x, center_y]])
+        return np.array([[0.0, 0.0]])
 
-    # Use ceil(sqrt) to guarantee enough grid points for num_worms
-    num_side = int(np.ceil(np.sqrt(num_worms)))  # e.g. 20 worms → ceil(sqrt(20))=5 → 5x5=25 points
+    positions = []
+    max_attempts = 10000
+    attempts = 0
 
-    x = np.linspace(0, shape[1], num_side + 2)[1:-1]  # exclude arena edges
-    y = np.linspace(0, shape[0], num_side + 2)[1:-1]
+    while len(positions) < num_worms and attempts < max_attempts:
+        # uniform random point inside circle
+        x = np.random.uniform(-R, R)
+        y = np.random.uniform(-R, R)
+        if x**2 + y**2 >= R**2:
+            attempts += 1
+            continue
 
-    coords = np.stack(np.meshgrid(x, y), -1).reshape(-1, 2)
-    # coords always has num_side^2 >= num_worms points
+        # check min distance from already placed worms
+        too_close = False
+        for px, py in positions:
+            if np.sqrt((x - px)**2 + (y - py)**2) < min_dist:
+                too_close = True
+                break
 
-    # Compute jitter range
-    if len(x) > 1 and len(y) > 1:
-        init_dist = min(x[1] - x[0], y[1] - y[0])
-    else:
-        init_dist = min(shape)
+        if not too_close:
+            positions.append([x, y])
+        attempts += 1
 
-    max_movement = max((init_dist - min_dist) / 2, 0)  # clamp to 0, never negative
-    noise = np.random.uniform(-max_movement, max_movement, size=(len(coords), 2))
+    if len(positions) < num_worms:
+        raise ValueError(
+            f"Could not place {num_worms} worms inside R={R} "
+            f"with min_dist={min_dist}. Try reducing min_dist."
+        )
 
-    return coords + noise
+    return np.array(positions)
 
-def create_worms(coords, dim, cfg, worm_params):
-    # Create worm objects with initial positions from grid coordinates
-    np.random.shuffle(coords)
+def create_worms(positions, cfg, worm_params):
+    """
+    positions: real (cm) coordinates, shape (num_worms, 2)
+    """
     worms = []
-    
+
     for worm_i in range(cfg.num_worms):
-        # Copy params for this worm
         worm_params_copy = worm_params.copy()
         worm_params_copy["num"] = worm_i
-        
-        # Create worm object
+        worm_params_copy["R"] = cfg.R   # pass R so boundary check works
+
         worm = Worms.Worm(worm_params_copy)
 
-        # Convert grid indices to real coordinates
-        if cfg.num_worms > 1:
-            # Only use grid placement if multiple worms
-            worm_x_idx = coords[worm_i][0]
-            worm_y_idx = coords[worm_i][1]
-            worm_x = convert_index_to_xy(worm_x_idx, idx_min=0, idx_max=dim, 
-                                        xy_min=cfg.x_min, xy_max=cfg.x_max)
-            worm_y = convert_index_to_xy(worm_y_idx, idx_min=0, idx_max=dim, 
-                                        xy_min=cfg.x_min, xy_max=cfg.x_max)
-            worm.x = worm_x
-            worm.y = worm_y
-        else:
-            # Single worm: start at origin
-            worm.x = 0.0
-            worm.y = 0.0
+        # override position set by __init_position
+        worm.x = float(positions[worm_i][0])
+        worm.y = float(positions[worm_i][1])
+        worm.theta = np.random.uniform(-np.pi, np.pi)
 
         worms.append(worm)
-    
+
     return worms
 
 def world_objects(cfg_options, world_params):
-    # Instantiate environment and worm objects
-    
-    # Calculate grid dimension
-    dim = len(np.arange(cfg_options.x_min, cfg_options.x_max, cfg_options.dx)) + 1
-
-    # Create environment and keeper objects
     environment = Environment.Environment(world_params["environment"])
     keeper = Keeper.Keeper(world_params["keeper"])
 
-    # Create worm(s)
+    # generate positions directly in cm, inside circle
     coords = generate_points_with_min_distance(
-        cfg_options.num_worms * 2,
-        shape=(dim, dim),
-        min_dist=10
+        num_worms=cfg_options.num_worms,
+        R=cfg_options.R,
+        min_dist=1.0       # minimum 1 cm between worms at start
     )
-    worms = create_worms(coords, dim, cfg_options, world_params["worm"])
+
+    worms = create_worms(coords, cfg_options, world_params["worm"])
 
     world_objs = {
         "environment": environment,
