@@ -137,12 +137,19 @@ class Environment:
         self.rho = self.__logistic_step(self.rho,  self.g_rho, self.K_rho)
         
         # 2) total bacteria before feeding
-        B = self.A_B * self.rho
+        B_before = self.A_B * self.rho
 
         # 3) feeding term: N_worms * F(A_B, rho, R) * dt
         N_worms = getattr(self, "num_worms")
-        dB_feed = self.feeding_rate() * N_worms * self.dt
-        B = max(B - dB_feed, 0.0) # Ensure non-negative bacteria count after feeding
+        F = self.feeding_rate()
+        dB_feed = F * N_worms * self.dt
+        B_after = max(B_before - dB_feed, 0.0) # Ensure non-negative bacteria count after feeding
+
+        self.B_before = B_before
+        self.B_after = B_after
+        self.dB_feed = dB_feed
+        self.F = F
+        B = B_after
 
         # 4) update density from new total bacteria
         if self.A_B > 0.0:

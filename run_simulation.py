@@ -1,6 +1,7 @@
 import os
 import glob
 from subprocess import call
+import time
 
 import config.config_src as config_src
 
@@ -33,8 +34,10 @@ if __name__ == '__main__':
     print("\n---------- Simulating worm movement ----------")
     print(f"Parameters: N={N}")
     try:
+        start_time = time.time()
         run_search(base_dir, cfg_files_dir, BASE_EXPERIMENT_DIR)
-        print("\nFin.\n")
+        total_time = time.time() - start_time
+        print(f"\nFinished. (total_time: {total_time:.2f} seconds)\n")
     except KeyboardInterrupt:
         print("\nCancelling experiments.")
     except Exception as e:

@@ -11,7 +11,7 @@ config_opts = {
     "t_min" : 0,            # min
     "t_max" : 1000,         # min
     "dx" : [0.05],          # cm
-    "dt": [0.01],              # min
+    "dt": [1],              # min
     "R" : [4.25],              # cm ( plate radius used for K_A)
 
     # Bacteria ODE parameters (Eqs. S1 & S2, Table S1)
@@ -22,11 +22,11 @@ config_opts = {
     "A_B_0" : np.pi * 0.5 * 0.5,            # initial bacteria patch area = pi * 0.5^2 cm^2
     "rho_0" : 1.27e8,                       # initial bacteria density (cells/cm^2)
     "boundary_k" : [10],                    # Boundary sharpness (cm^-1). Large (e.g. 100) = sharp ring, small (e.g. 2) = wide sensing range. Negative value means no boundary.
-    "feed_c" : [2.5e-9],                       # Amplitude of Gaussian food source (cells/cm^2). 0 means no food source.
-    "feed_sigma" : [1000],                   # Width of Gaussian food source (
+    "feed_c" : [2.5e-9],                      
+    "feed_sigma" : [1000],                   
 
     # Worm SDE motility parameters
-    "num_worms" : 40,
+    "num_worms" : 10,
     "v_max" : 2,              # speed at low bacterial density (exploring) (cm/min)
     "v_min" : 0.2,             # speed at high bacterial density (dwelling) (cm/min)
     "alpha" : 4.0,             # how strongly speed decreases with bacterial density (speed suppresion sensitivity)
