@@ -58,8 +58,12 @@ class Environment:
         self.A_B = getattr(self, "A_B_0")      # cm^2
         self.rho = getattr(self, "rho_0")               # cells/cm^2
 
+        # self.bacteria_map = np.zeros_like(self.x_grid, dtype=float)
+        # self.__init_bacteria_patch()
+
         self.bacteria_map = np.zeros_like(self.x_grid, dtype=float)
         self.__init_bacteria_patch()
+        self.__update_bacteria_gradient()
 
     def __init_bacteria_patch(self):
         # """
@@ -89,6 +93,16 @@ class Environment:
         k = getattr(self, "boundary_k")          # cm^-1, tunable parameter
         self.bacteria_map = self.rho / (1.0 + np.exp(k * (dist - R)))
 
+    def __update_bacteria_gradient(self):
+        """
+        Compute graident of normalised bacteria map b_norm = bacteria_map / K_rho
+        and store as grad_bn_x (d b_norm / dx) and grad_bn_y (d b_norm / dy).
+        """
+        b_norm = self.bacteria_map/self.K_rho
+        grad_row, grad_col = np.gradient(b_norm, self.dx)
+        self.grad_bn_x = grad_col
+        self.grad_bn_y = grad_row
+
     def __logistic_step(self, x, g, K):
         """
         Exact analytical solution of logistic ODE over one timestep dt:
@@ -107,8 +121,8 @@ class Environment:
         if A_B <= 0.0 or rho <= 0.0:
             return 0.0
         
-        c = getattr(self, "feed_c")  # Amplitude of Gaussian food source (cells/cm^2)
-        sigma = getattr(self, "feed_sigma")  # Width of Gaussian food source (cm)
+        c = getattr(self, "feed_c")
+        sigma = getattr(self, "feed_sigma") 
         psi = np.exp(-np.pi * R**2 / (sigma * A_B))
         F = (c * psi * rho * A_B) / (1.0 + c * psi * rho * A_B)
         return F
@@ -138,6 +152,9 @@ class Environment:
 
         # 5) rebuild spatial map
         self.__init_bacteria_patch()
+        
+        # 6) update gradient of normalised bacteria map
+        self.__update_bacteria_gradient()
 
         # Debug print
         # print(

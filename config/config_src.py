@@ -26,7 +26,7 @@ config_opts = {
     "feed_sigma" : [1000],                   # Width of Gaussian food source (
 
     # Worm SDE motility parameters
-    "num_worms" : 10,
+    "num_worms" : 40,
     "v_max" : 2,              # speed at low bacterial density (exploring) (cm/min)
     "v_min" : 0.2,             # speed at high bacterial density (dwelling) (cm/min)
     "alpha" : 4.0,             # how strongly speed decreases with bacterial density (speed suppresion sensitivity)

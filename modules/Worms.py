@@ -65,7 +65,7 @@ class Worm(object):
         
         1. Convert (x, y) to grid indices
         2. Sample bacteria_map at that index
-        3. Compute gradient via np.gradient on full map, sample at index
+        3. Look up precomputed gradient at that index
         
         Returns
         -------
@@ -90,12 +90,18 @@ class Worm(object):
         # Normalised density at worm position
         b_norm = bmap[row, col] / K
 
-        # Gradient of normalised bacteria map (returns [grad_row, grad_col])
-        # np.gradient returns derivatives w.r.t. array indices; divide by dx for cm units
-        grad_row, grad_col = np.gradient(bmap / K, dx)
+        # # Gradient of normalised bacteria map (returns [grad_row, grad_col])
+        # # np.gradient returns derivatives w.r.t. array indices; divide by dx for cm units
+        # grad_row, grad_col = np.gradient(bmap / K, dx)
 
-        # grad_col -> d/dx,  grad_row -> d/dy
-        grad_bn = np.array([grad_col[row, col], grad_row[row, col]])
+        # # grad_col -> d/dx,  grad_row -> d/dy
+        # grad_bn = np.array([grad_col[row, col], grad_row[row, col]])
+
+        # Gradient of normalised bacteria map, precomputed once per timestep
+        grad_bn_x = environment.grad_bn_x[row, col]  # d b_norm / dx
+        grad_bn_y = environment.grad_bn_y[row, col]  # d b_norm / dy
+
+        grad_bn = np.array([grad_bn_x, grad_bn_y])
 
         return b_norm, grad_bn
     
