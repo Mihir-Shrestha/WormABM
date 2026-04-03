@@ -15,14 +15,14 @@ def main(cfg_options, environment, worms, keeper):
             if cfg_options.verbose and global_i % 100 == 0:  # Print every 100 timesteps
                 print(f"\rTimestep: {global_i+1}/{environment.t_grid.shape[0]}")
 
-            # Initialize or update bacteria map
-            environment.update_bacteria_map()
-
             for worm in worms:
                 worm.step(environment)
 
                 # Measure and store worm info
                 keeper.measure_worms(worm, global_i)
+
+            # Apply growth and depletion using the summed per-worm feeding
+            environment.update_bacteria_map()
 
             # Store environment info after all worms have moved
             keeper.measure_environment(environment)

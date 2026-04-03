@@ -9,6 +9,7 @@ class Keeper(object):
 
         self.B_before_hist = []  # Total bacteria before feeding
         self.B_after_hist = []   # Total bacteria after feeding
+        self.dB_feed_requested_hist = []  # Summed worm consumption before clamping
         self.dB_feed_hist = []   # Total bacteria consumed by worms
         self.F_hist = []         # Feeding rate F(A_B, rho, R)
 
@@ -25,6 +26,9 @@ class Keeper(object):
             "x"     : [],
             "y"     : [],
             "theta" : [],
+            "on_patch" : [],
+            "cells_eaten_step" : [],
+            "cells_eaten_total" : [],
         }
 
     def __update_worm_history(self, worm_info):
@@ -39,6 +43,7 @@ class Keeper(object):
             # 1D scalar time series
             outfile.create_dataset("B_before", data=self.B_before_hist)
             outfile.create_dataset("B_after", data=self.B_after_hist)
+            outfile.create_dataset("dB_feed_requested", data=self.dB_feed_requested_hist)
             outfile.create_dataset("dB_feed", data=self.dB_feed_hist)
             outfile.create_dataset("F", data=self.F_hist)
             
@@ -55,6 +60,7 @@ class Keeper(object):
         self.environment_history.append(environment.bacteria_map.copy())
         self.B_before_hist.append(environment.B_before)
         self.B_after_hist.append(environment.B_after)
+        self.dB_feed_requested_hist.append(environment.dB_feed_requested)
         self.dB_feed_hist.append(environment.dB_feed)
         self.F_hist.append(environment.F)
 
@@ -70,6 +76,9 @@ class Keeper(object):
             "x"      : worm.x,
             "y"      : worm.y,
             "theta"  : worm.theta,
+            "on_patch" : worm.on_patch,
+            "cells_eaten_step" : worm.cells_eaten_step,
+            "cells_eaten_total" : worm.cells_eaten_total,
         }
         self.__update_worm_history(worm_info)
 

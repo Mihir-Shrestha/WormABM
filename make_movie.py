@@ -118,8 +118,8 @@ def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_co
         else:
             # --- default: show density ---
             bacteria_masked = np.ma.masked_where(bacteria_grid == 0, bacteria_grid)
-            min_b = script_config.get('rho_0', 1.27e8)
-            max_b = script_config.get('K_rho', 4.58e8)
+            min_b = script_config.get('rho_0') * 0.5
+            max_b = script_config.get('K_rho')
 
             cmap = plt.cm.Greens.copy()
             cmap.set_bad(color='white')

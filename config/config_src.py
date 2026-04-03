@@ -11,7 +11,7 @@ config_opts = {
     "t_min" : 0,            # min
     "t_max" : 1000,         # min
     "dx" : [0.05],          # cm
-    "dt": [1],              # min
+    "dt": [0.01],              # min
     "R" : [4.25],              # cm ( plate radius used for K_A)
 
     # Bacteria ODE parameters (Eqs. S1 & S2, Table S1)

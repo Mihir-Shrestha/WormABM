@@ -20,6 +20,9 @@ class Worm(object):
     def __init__(self, params):
         self.__set_params(params)
         self.__init_position()
+        self.on_patch = False       
+        self.cells_eaten_step = 0.0
+        self.cells_eaten_total = 0.0
     
     # ------------------------------------------------------------------
     # Initialisation
@@ -90,44 +93,18 @@ class Worm(object):
         # Normalised density at worm position
         b_norm = bmap[row, col] / K
 
-        # # Gradient of normalised bacteria map (returns [grad_row, grad_col])
-        # # np.gradient returns derivatives w.r.t. array indices; divide by dx for cm units
-        # grad_row, grad_col = np.gradient(bmap / K, dx)
-
-        # # grad_col -> d/dx,  grad_row -> d/dy
-        # grad_bn = np.array([grad_col[row, col], grad_row[row, col]])
-
         # Gradient of normalised bacteria map, precomputed once per timestep
         grad_bn_x = environment.grad_bn_x[row, col]  # d b_norm / dx
         grad_bn_y = environment.grad_bn_y[row, col]  # d b_norm / dy
 
         grad_bn = np.array([grad_bn_x, grad_bn_y])
 
+        # On-patch uses an explicit b_norm threshold to avoid treating tiny tails as patch.
+        self.on_patch = environment.is_on_patch(b_norm)
+
         return b_norm, grad_bn
     
-    def __check_arena_boundary(self, environment, new_x, new_y):
-        # """
-        # Keep worm inside arena. If proposed move exits boundary, 
-        # stay at current position (wall absorption).
-        # Returns valid (x, y).
-        # """
-        # x = np.clip(new_x, environment.x_min, environment.x_max)
-        # y = np.clip(new_y, environment.x_min, environment.x_max)
-        # return x, y
-        
-        # """
-        # Keep worm inside circular arena of radius R centered at origin.
-        # If proposed move exits boundary, clamp to the boundary circle.
-        # """
-        # R = environment.R
-        # dist = np.sqrt(new_x**2 + new_y**2)
-        # if dist > R:
-        #     # project back onto circle boundary
-        #     scale = R / dist
-        #     new_x = new_x * scale
-        #     new_y = new_y * scale
-        # return new_x, new_y
-        
+    def __check_arena_boundary(self, environment, new_x, new_y):        
         """
         Reflective circular boundary of radius R.
         If the proposed position exits the circle, reflect the velocity
@@ -181,9 +158,20 @@ class Worm(object):
         # --- sample local field ---
         b_norm, grad_bn = self.__get_bacteria_and_gradient(environment)
 
+        # --- per-worm feeding
+        rate_per_worm = 70.0
+        if self.on_patch:
+            local_feed_factor = environment.feeding_rate_from_bnorm(b_norm)
+            dB_worm = local_feed_factor * rate_per_worm * dt
+        else:
+            dB_worm = 0.0
+        self.cells_eaten_step = dB_worm
+        self.cells_eaten_total += dB_worm
+        environment.register_worm_consumption(dB_worm)
+
         # --- diagnostic suppression inside patch ---
         suppress = getattr(self, "suppress_patch_chemotaxis", False)
-        on_patch = b_norm > 0.0
+        on_patch = self.on_patch
 
         if suppress and on_patch:
             # Force pure random walk: no gradient bias, no speed/noise suppression

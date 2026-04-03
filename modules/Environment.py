@@ -53,6 +53,7 @@ class Environment:
         self.R = getattr(self, "R")              # cm, used for K_A
         self.K_A   = np.pi * self.R**2           # cm^2, area carrying capacity (derived from plate radius)
         self.K_rho = getattr(self, "K_rho")            # cells/cm^2
+        self.patch_bnorm_threshold = getattr(self, "patch_bnorm_threshold", 0.01)
 
         # Scalar ODE state variables
         self.A_B = getattr(self, "A_B_0")      # cm^2
@@ -64,6 +65,17 @@ class Environment:
         self.bacteria_map = np.zeros_like(self.x_grid, dtype=float)
         self.__init_bacteria_patch()
         self.__update_bacteria_gradient()
+        self.pending_worm_consumption = 0.0
+        self.dB_feed_requested = 0.0
+
+    def is_on_patch(self, b_norm):
+        """Return True when local normalised bacteria is high enough to count as patch."""
+        return b_norm >= self.patch_bnorm_threshold
+
+    def register_worm_consumption(self, dB_worm):
+        """Accumulate bacteria consumed by worms during the current timestep."""
+        if dB_worm > 0.0:
+            self.pending_worm_consumption += dB_worm
 
     def __init_bacteria_patch(self):
         # """
@@ -127,6 +139,24 @@ class Environment:
         F = (c * psi * rho * A_B) / (1.0 + c * psi * rho * A_B)
         return F
 
+    def feeding_rate_from_bnorm(self, b_norm):
+        """
+        Local feeding modulation from normalised concentration at worm position.
+        Returns a factor in [0, 1] used to scale the 70 cells/min per-worm baseline.
+        """
+        b = max(float(b_norm), 0.0)
+        b_half = getattr(self, "local_feed_b_half", 0.1)
+        hill_n = getattr(self, "local_feed_hill_n", 2.0)
+
+        if b_half <= 0.0:
+            return 1.0 if b > 0.0 else 0.0
+
+        num = b ** hill_n
+        den = (b_half ** hill_n) + num
+        if den <= 0.0:
+            return 0.0
+        return num / den
+
     def update_bacteria_map(self):
         """
         Advance A_B and rho by dt minutes using exact logistic solutions (S1, S2),
@@ -136,17 +166,19 @@ class Environment:
         self.A_B = self.__logistic_step(self.A_B, self.g_A,   self.K_A)
         self.rho = self.__logistic_step(self.rho,  self.g_rho, self.K_rho)
         
-        # 2) total bacteria before feeding
         B_before = self.A_B * self.rho
+        # 2) total bacteria before feeding
 
-        # 3) feeding term: N_worms * F(A_B, rho, R) * dt
-        N_worms = getattr(self, "num_worms")
+        # 3) feeding term from actual summed per-worm intake this step
         F = self.feeding_rate()
-        dB_feed = F * N_worms * self.dt
+        dB_feed_requested = self.pending_worm_consumption
+        dB_feed = min(dB_feed_requested, B_before)
+        self.pending_worm_consumption = 0.0
         B_after = max(B_before - dB_feed, 0.0) # Ensure non-negative bacteria count after feeding
 
         self.B_before = B_before
         self.B_after = B_after
+        self.dB_feed_requested = dB_feed_requested
         self.dB_feed = dB_feed
         self.F = F
         B = B_after
@@ -162,14 +194,6 @@ class Environment:
         
         # 6) update gradient of normalised bacteria map
         self.__update_bacteria_gradient()
-
-        # Debug print
-        # print(
-        #     f"A_B={self.A_B:.4f} cm^2  "
-        #     f"r={np.sqrt(self.A_B/np.pi):.4f} cm  "
-        #     f"rho={self.rho:.3e} cells/cm^2  "
-        #     f"B={self.A_B * self.rho:.3e} cells"
-        # )
 
     def add_bacteria_source(self, x, y, amount):
         """Deposits bacteria as a small patch at (x,y)"""
