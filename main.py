@@ -11,6 +11,7 @@ def main(cfg_options, environment, worms, keeper):
     
     try:
         for global_i, t_i in enumerate(environment):
+            record_now = keeper.should_record_step(global_i)
             
             if cfg_options.verbose and global_i % 100 == 0:  # Print every 100 timesteps
                 print(f"\rTimestep: {global_i+1}/{environment.t_grid.shape[0]}")
@@ -19,13 +20,15 @@ def main(cfg_options, environment, worms, keeper):
                 worm.step(environment)
 
                 # Measure and store worm info
-                keeper.measure_worms(worm, global_i)
+                if record_now:
+                    keeper.measure_worms(worm, global_i)
 
             # Apply growth and depletion using the summed per-worm feeding
             environment.update_bacteria_map()
 
             # Store environment info after all worms have moved
-            keeper.measure_environment(environment)
+            if record_now:
+                keeper.measure_environment(environment, global_i)
         
         # Save data to h5 files
         keeper.log_data_to_handy_dandy_notebook()

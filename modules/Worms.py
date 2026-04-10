@@ -1,4 +1,5 @@
 import numpy as np
+from collections import deque
 
 class Worm(object):
     """
@@ -23,6 +24,47 @@ class Worm(object):
         self.on_patch = False       
         self.cells_eaten_step = 0.0
         self.cells_eaten_total = 0.0
+        self.cells_available_to_deposit = 0.0
+
+        # Deposition state
+        self.surface_cells_carried = 0.0
+        self.gut_cells_for_drop = 0.0
+        self.surface_drop_step = 0.0
+        self.gut_drop_step = 0.0
+        self.surface_drop_total = 0.0
+        self.gut_drop_total = 0.0
+        self.timestep = 0
+
+        self.deposition_enabled = getattr(
+            self,
+            "deposition_enabled",
+            getattr(self, "bacteria_enabled", True),
+        )
+        self.deposition_fraction = max(float(getattr(self, "deposition_fraction", 1.0)), 0.0)
+
+        # Surface shedding pathway (random intervals)
+        self.surface_shedding_enabled = bool(getattr(self, "surface_shedding_enabled", True))
+        self.surface_pickup_rate = max(float(getattr(self, "surface_pickup_rate", 2.0)), 0.0)  # cells/min
+        self.surface_carry_capacity = max(float(getattr(self, "surface_carry_capacity", 40.0)), 0.0)
+        default_interval = int(getattr(self, "deposition_interval_steps", getattr(self, "bacteria_drop_interval", 5)))
+        self.surface_shed_mean_steps = max(int(getattr(self, "surface_shed_mean_steps", default_interval)), 1)
+        self.surface_shed_fraction_min = float(getattr(self, "surface_shed_fraction_min", 0.02))
+        self.surface_shed_fraction_max = float(getattr(self, "surface_shed_fraction_max", 0.15))
+        if self.surface_shed_fraction_max < self.surface_shed_fraction_min:
+            self.surface_shed_fraction_min, self.surface_shed_fraction_max = self.surface_shed_fraction_max, self.surface_shed_fraction_min
+        default_surface_cap = float(getattr(self, "deposition_max_per_event", getattr(self, "bacteria_amount", 0.0)))
+        self.surface_shed_max_cells = float(getattr(self, "surface_shed_max_cells", default_surface_cap))
+        self.surface_drop_jitter_radius = max(float(getattr(self, "surface_drop_jitter_radius", 0.08)), 0.0)
+        self.next_surface_shed_timestep = self.__sample_surface_shed_interval()
+
+        # Drop pathway (triggered by eaten amount)
+        self.gut_drop_enabled = bool(getattr(self, "gut_drop_enabled", True))
+        self.gut_drop_trigger_cells = max(float(getattr(self, "gut_drop_trigger_cells", 35.0)), 1e-9)
+        self.gut_drop_conversion_fraction = float(np.clip(getattr(self, "gut_drop_conversion_fraction", 0.25), 0.0, 1.0))
+        self.gut_drop_delay_steps = max(int(getattr(self, "gut_drop_delay_steps", 1000)), 0)
+        self.gut_drop_jitter_radius = max(float(getattr(self, "gut_drop_jitter_radius", 0.05)), 0.0)
+        self.gut_drop_max_events_per_step = max(int(getattr(self, "gut_drop_max_events_per_step", 5)), 1)
+        self._gut_drop_release_queue = deque()
     
     # ------------------------------------------------------------------
     # Initialisation
@@ -140,6 +182,33 @@ class Worm(object):
 
         return new_x, new_y
 
+    def __sample_surface_shed_interval(self):
+        """Sample random shedding interval in timesteps (exponential waiting time)."""
+        return max(1, int(np.random.exponential(self.surface_shed_mean_steps)))
+
+    def __deposit_with_jitter(self, environment, amount, jitter_radius):
+        """Deposit amount near current location with small random spatial jitter."""
+        if amount <= 0.0:
+            return 0.0
+
+        if jitter_radius > 0.0:
+            ang = np.random.uniform(0.0, 2.0 * np.pi)
+            r = np.sqrt(np.random.uniform(0.0, 1.0)) * jitter_radius
+            x_drop = self.x + r * np.cos(ang)
+            y_drop = self.y + r * np.sin(ang)
+        else:
+            x_drop = self.x
+            y_drop = self.y
+
+        environment.add_bacteria_source(x_drop, y_drop, amount)
+        return amount
+
+    def __release_delayed_gut_cells(self):
+        """Move matured eaten cells into gut reservoir once their delay has elapsed."""
+        while self._gut_drop_release_queue and self._gut_drop_release_queue[0][0] <= self.timestep:
+            _, amount = self._gut_drop_release_queue.popleft()
+            self.gut_cells_for_drop += amount
+
     
     # ------------------------------------------------------------------
     # Public step
@@ -157,9 +226,12 @@ class Worm(object):
 
         # --- sample local field ---
         b_norm, grad_bn = self.__get_bacteria_and_gradient(environment)
+        self.surface_drop_step = 0.0
+        self.gut_drop_step = 0.0
 
         # --- per-worm feeding
         rate_per_worm = 70.0
+        local_feed_factor = 0.0
         if self.on_patch:
             local_feed_factor = environment.feeding_rate_from_bnorm(b_norm)
             dB_worm = local_feed_factor * rate_per_worm * dt
@@ -168,6 +240,16 @@ class Worm(object):
         self.cells_eaten_step = dB_worm
         self.cells_eaten_total += dB_worm
         environment.register_worm_consumption(dB_worm)
+
+        if self.deposition_enabled:
+            if self.surface_shedding_enabled and self.on_patch:
+                pickup = self.surface_pickup_rate * local_feed_factor * dt
+                self.surface_cells_carried = min(self.surface_cells_carried + pickup, self.surface_carry_capacity)
+
+            if self.gut_drop_enabled and self.deposition_fraction > 0.0:
+                delayed_cells = self.deposition_fraction * dB_worm
+                release_step = self.timestep + self.gut_drop_delay_steps
+                self._gut_drop_release_queue.append((release_step, delayed_cells))
 
         # --- diagnostic suppression inside patch ---
         suppress = getattr(self, "suppress_patch_chemotaxis", False)
@@ -204,10 +286,42 @@ class Worm(object):
         # --- boundary check ---
         self.x, self.y = self.__check_arena_boundary(environment, new_x, new_y)
 
+        # --- deposit after movement ---
+        self.__release_delayed_gut_cells()
+        self.__drop_bacteria(environment)
+        self.cells_available_to_deposit = self.surface_cells_carried + (self.gut_cells_for_drop * self.gut_drop_conversion_fraction)
+        self.timestep += 1
+
     def __drop_bacteria(self, environment):
-        """Drop bacteria source at current location at fixed intervals"""
-        # if not self.bacteria_enabled:
-        #     return
-        if self.timestep >= self.next_drop_timestep:
-            environment.add_bacteria_source(self.x, self.y, self.bacteria_amount)
-            self.next_drop_timestep += int(self.bacteria_drop_interval)
+        """Deposit via two pathways: random surface shedding and threshold-triggered drop."""
+        if not self.deposition_enabled:
+            return
+
+        # 1) Surface shedding at random intervals
+        if self.surface_shedding_enabled and self.timestep >= self.next_surface_shed_timestep:
+            # Shedding occurs only outside patch; carrying can still be acquired on patch.
+            if (not self.on_patch) and self.surface_cells_carried > 0.0:
+                frac = np.random.uniform(self.surface_shed_fraction_min, self.surface_shed_fraction_max)
+                amount = self.surface_cells_carried * max(frac, 0.0)
+                if self.surface_shed_max_cells > 0.0:
+                    amount = min(amount, self.surface_shed_max_cells)
+
+                dropped = self.__deposit_with_jitter(environment, amount, self.surface_drop_jitter_radius)
+                self.surface_cells_carried = max(self.surface_cells_carried - dropped, 0.0)
+                self.surface_drop_step += dropped
+                self.surface_drop_total += dropped
+
+                self.next_surface_shed_timestep += self.__sample_surface_shed_interval()
+
+        # 2) Gut-drop events after consuming threshold amount
+        if not self.gut_drop_enabled:
+            return
+
+        events = 0
+        while self.gut_cells_for_drop >= self.gut_drop_trigger_cells and events < self.gut_drop_max_events_per_step:
+            self.gut_cells_for_drop -= self.gut_drop_trigger_cells
+            amount = self.gut_drop_trigger_cells * self.gut_drop_conversion_fraction
+            dropped = self.__deposit_with_jitter(environment, amount, self.gut_drop_jitter_radius)
+            self.gut_drop_step += dropped
+            self.gut_drop_total += dropped
+            events += 1

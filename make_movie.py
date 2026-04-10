@@ -85,7 +85,9 @@ def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_co
     """Plot a single frame of the simulation including worms and bacteria concentration"""
 
     # Fixed figure size — must be identical every frame so cv2 can stack them
-    fig = plt.figure(figsize=(8, 7))
+    fig = plt.figure(figsize=(8, 7), facecolor='black')
+    ax = plt.gca()
+    ax.set_facecolor('black')
 
     if len(bacteria_history) > frame_i:
         bacteria_grid = bacteria_history[frame_i].copy()
@@ -99,7 +101,7 @@ def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_co
             grad_y, grad_x = np.gradient(b_norm, dx)               # both in cm^-1
             grad_mag   = np.sqrt(grad_x**2 + grad_y**2)            # magnitude |∇b_norm|
 
-            # Mask zeros so background stays white
+            # Mask zeros so background stays black
             grad_masked = np.ma.masked_where(grad_mag == 0, grad_mag)
             # Mask near-zero values (inside and outside patch)
             # Use a small threshold instead of == 0 to catch floating point near-zeros
@@ -114,25 +116,35 @@ def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_co
 
             clb = plt.colorbar(im, shrink=0.8, format='%.2e')
             clb.ax.set_title('|∇b|\n(cm⁻¹)', fontsize=7)
+            clb.ax.set_facecolor('black')
+            clb.outline.set_edgecolor('white')
+            clb.ax.tick_params(color='white', labelcolor='white')
+            clb.ax.title.set_color('white')
 
         else:
             # --- default: show density ---
+            min_factor = script_config.get('movie_min_density_factor', 0.1)
+            min_b = script_config.get('rho_0', 1.27e8) * min_factor
+            max_b = script_config.get('K_rho', 4.58e8)
             bacteria_masked = np.ma.masked_where(bacteria_grid == 0, bacteria_grid)
-            min_b = script_config.get('rho_0') * 0.5
-            max_b = script_config.get('K_rho')
 
             cmap = plt.cm.Greens.copy()
-            cmap.set_bad(color='white')
+            cmap.set_bad(color='black')
 
             im = plt.imshow(bacteria_masked, cmap=cmap, vmin=min_b, vmax=max_b,
                             origin='upper', alpha=0.8, interpolation='bilinear')
 
             clb = plt.colorbar(im, shrink=0.8, format='%.2e')
             clb.ax.set_title('Density\n(cells/cm²)', fontsize=7)
+            clb.ax.set_facecolor('black')
+            clb.outline.set_edgecolor('white')
+            clb.ax.tick_params(color='white', labelcolor='white')
+            clb.ax.title.set_color('white')
 
     # --- worms and trails ---
     num_worms  = len(worms)
     worm_colors = plt.cm.tab10(np.linspace(0, 1, max(num_worms, 1)))
+    grid_size = bacteria_history[0].shape[0] if len(bacteria_history) > 0 else 301
 
     # How many past frames to show in trail (e.g. last 100 frames)
     TRAIL_LENGTH = 100
@@ -166,16 +178,16 @@ def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_co
             convert_xy_to_index(worm_vals['x'][frame_i]),
             convert_xy_to_index(worm_vals['y'][frame_i]),
             color=color, s=30,                         # reduced from 100
-            edgecolors='black', linewidths=0.5,
+            edgecolors='white', linewidths=0.5,
             zorder=10
         )
 
     # --- formatting ---
-    GRID_SIZE = bacteria_history[0].shape[0] if len(bacteria_history) > 0 else 301
+    GRID_SIZE = grid_size
     plt.xlim(0, GRID_SIZE)
     plt.ylim(0, GRID_SIZE)
-    plt.xlabel("X (cm)")
-    plt.ylabel("Y (cm)")
+    plt.xlabel("X (cm)", color='white')
+    plt.ylabel("Y (cm)", color='white')
 
     # Tick labels in cm instead of grid indices
     n_ticks  = 7
@@ -183,8 +195,11 @@ def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_co
     x_max    = script_config['x_max']
     tick_idx = np.linspace(0, GRID_SIZE, n_ticks)
     tick_lbl = [f"{v:.1f}" for v in np.linspace(x_min, x_max, n_ticks)]
-    plt.xticks(tick_idx, tick_lbl, fontsize=7)
-    plt.yticks(tick_idx, tick_lbl, fontsize=7)
+    plt.xticks(tick_idx, tick_lbl, fontsize=7, color='white')
+    plt.yticks(tick_idx, tick_lbl, fontsize=7, color='white')
+    plt.tick_params(colors='white')
+    for spine in ax.spines.values():
+        spine.set_color('white')
 
     N      = script_config['num_worms']
     dx_val = f"{script_config.get('dx', 0):.3f}".rstrip('0').rstrip('.')
@@ -193,10 +208,10 @@ def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_co
     vmin_val = f"{script_config.get('v_min', 0):.2f}".rstrip('0').rstrip('.')
     title  = (f"Worms: {int(N)} -- dx: {dx_val} -- dt: {dt_val} "
               f"-- k: {script_config.get('boundary_k')} -- R: {script_config.get('R')} -- vmax: {vmax_val} -- vmin: {vmin_val}")
-    plt.title(f"{title}\nt: {frame_i}/{total_frames}")
+    plt.title(f"{title}\nt: {frame_i}/{total_frames}", color='white')
 
     filename = f'{MOVIE_FRAME_PATH}/t{frame_i:05d}.png'
-    plt.savefig(filename, dpi=150)
+    plt.savefig(filename, dpi=150, facecolor=fig.get_facecolor())
     plt.close()
 
 def setup_opts():

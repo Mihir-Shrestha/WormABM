@@ -24,6 +24,7 @@ def config_options():
     parser.add_argument("--verbose", action='store_true', help="Enable verbose output")
     parser.add_argument("--random_seed", type=int, default=42)
     parser.add_argument("--measurements_on", type=bool, default=True)
+    parser.add_argument("--save_interval_minutes", type=float, default=0.0)
 
     # Environment parameters
     parser.add_argument("--x_min", type=float)
@@ -44,6 +45,14 @@ def config_options():
     parser.add_argument("--boundary_k", type=float)      # Boundary sharpness (cm^-1). Large (e.g. 100) = sharp ring, small (e.g. 2) = wide sensing range
     parser.add_argument("--feed_c", type=float)          # Amplitude of Gaussian food source (cells/cm^2). 0 means no food source.
     parser.add_argument("--feed_sigma", type=float)      # Width of Gaussian food source (
+    parser.add_argument("--patch_bnorm_threshold", type=float, default=0.01)
+    parser.add_argument("--local_feed_b_half", type=float, default=0.1)
+    parser.add_argument("--local_feed_hill_n", type=float, default=2.0)
+    parser.add_argument("--movie_min_density_factor", type=float, default=0.1)
+    parser.add_argument("--deposit_patch_radius", type=float, default=0.03)
+    parser.add_argument("--deposit_patch_radius_pixels", type=int, default=1)
+    parser.add_argument("--deposit_cells_multiplier", type=float, default=20.0)
+    parser.add_argument("--deposit_merge_distance", type=float, default=0.03)
 
     # Worm parameters
     parser.add_argument("--num_worms", type=int)
@@ -59,6 +68,24 @@ def config_options():
     parser.add_argument("--bacteria_enabled", action='store_true', help="Enable bacteria dropping")
     parser.add_argument("--bacteria_drop_interval", type=int, default=5)
     parser.add_argument("--bacteria_amount", type=float, default=1.0)
+    parser.add_argument("--deposition_enabled", type=int, default=1, help="Enable deposition from eaten cells (1/0)")
+    parser.add_argument("--deposition_fraction", type=float, default=1.0)
+    parser.add_argument("--deposition_interval_steps", type=int, default=5)
+    parser.add_argument("--deposition_max_per_event", type=float, default=0.0)
+    parser.add_argument("--surface_shedding_enabled", type=int, default=1)
+    parser.add_argument("--surface_pickup_rate", type=float, default=2.0)
+    parser.add_argument("--surface_carry_capacity", type=float, default=40.0)
+    parser.add_argument("--surface_shed_mean_steps", type=int, default=300)
+    parser.add_argument("--surface_shed_fraction_min", type=float, default=0.02)
+    parser.add_argument("--surface_shed_fraction_max", type=float, default=0.15)
+    parser.add_argument("--surface_shed_max_cells", type=float, default=0.0)
+    parser.add_argument("--surface_drop_jitter_radius", type=float, default=0.08)
+    parser.add_argument("--gut_drop_enabled", type=int, default=1)
+    parser.add_argument("--gut_drop_trigger_cells", type=float, default=35.0)
+    parser.add_argument("--gut_drop_conversion_fraction", type=float, default=0.25)
+    parser.add_argument("--gut_drop_delay_steps", type=int, default=1000)
+    parser.add_argument("--gut_drop_jitter_radius", type=float, default=0.05)
+    parser.add_argument("--gut_drop_max_events_per_step", type=int, default=5)
 
     # Config file
     parser.add_argument("--file", type=open, action=LoadFromFile)
@@ -100,10 +127,17 @@ def directory(config):
 
 def world_parameters(cfg, model_dir):
     # Organize parameters into dictionaries
+    if cfg.save_interval_minutes > 0.0 and cfg.dt > 0.0:
+        save_interval_steps = max(int(round(cfg.save_interval_minutes / cfg.dt)), 1)
+    else:
+        save_interval_steps = 1
+
     keeper_params = {
         "worm_path": os.path.join(model_dir, "worm_hist.h5"),
         "environment_path": os.path.join(model_dir, "environment_hist.h5"),
         "sleeping": not cfg.measurements_on,
+        "save_interval_steps": save_interval_steps,
+        "save_interval_minutes": cfg.save_interval_minutes,
     }
 
     environment_params = {
@@ -123,7 +157,15 @@ def world_parameters(cfg, model_dir):
         "boundary_k": cfg.boundary_k,
         "num_worms": cfg.num_worms,
         "feed_c": cfg.feed_c,
-        "feed_sigma": cfg.feed_sigma
+        "feed_sigma": cfg.feed_sigma,
+        "patch_bnorm_threshold": cfg.patch_bnorm_threshold,
+        "local_feed_b_half": cfg.local_feed_b_half,
+        "local_feed_hill_n": cfg.local_feed_hill_n,
+        "movie_min_density_factor": cfg.movie_min_density_factor,
+        "deposit_patch_radius": cfg.deposit_patch_radius,
+        "deposit_patch_radius_pixels": cfg.deposit_patch_radius_pixels,
+        "deposit_cells_multiplier": cfg.deposit_cells_multiplier,
+        "deposit_merge_distance": cfg.deposit_merge_distance,
     }
 
     worm_params = {
@@ -139,6 +181,24 @@ def world_parameters(cfg, model_dir):
         "bacteria_enabled": cfg.bacteria_enabled,
         "bacteria_drop_interval": cfg.bacteria_drop_interval,
         "bacteria_amount": cfg.bacteria_amount,
+        "deposition_enabled": bool(cfg.deposition_enabled),
+        "deposition_fraction": cfg.deposition_fraction,
+        "deposition_interval_steps": cfg.deposition_interval_steps,
+        "deposition_max_per_event": cfg.deposition_max_per_event,
+        "surface_shedding_enabled": bool(cfg.surface_shedding_enabled),
+        "surface_pickup_rate": cfg.surface_pickup_rate,
+        "surface_carry_capacity": cfg.surface_carry_capacity,
+        "surface_shed_mean_steps": cfg.surface_shed_mean_steps,
+        "surface_shed_fraction_min": cfg.surface_shed_fraction_min,
+        "surface_shed_fraction_max": cfg.surface_shed_fraction_max,
+        "surface_shed_max_cells": cfg.surface_shed_max_cells,
+        "surface_drop_jitter_radius": cfg.surface_drop_jitter_radius,
+        "gut_drop_enabled": bool(cfg.gut_drop_enabled),
+        "gut_drop_trigger_cells": cfg.gut_drop_trigger_cells,
+        "gut_drop_conversion_fraction": cfg.gut_drop_conversion_fraction,
+        "gut_drop_delay_steps": cfg.gut_drop_delay_steps,
+        "gut_drop_jitter_radius": cfg.gut_drop_jitter_radius,
+        "gut_drop_max_events_per_step": cfg.gut_drop_max_events_per_step,
     }
 
     world_params = {

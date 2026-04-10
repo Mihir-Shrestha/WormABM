@@ -58,6 +58,10 @@ class Environment:
         # Scalar ODE state variables
         self.A_B = getattr(self, "A_B_0")      # cm^2
         self.rho = getattr(self, "rho_0")               # cells/cm^2
+        self.deposited_map = np.zeros_like(self.x_grid, dtype=float)
+        self._deposit_event_count = 0
+        self.num_deposited_patches = 0
+        self.B_deposited = 0.0
 
         # self.bacteria_map = np.zeros_like(self.x_grid, dtype=float)
         # self.__init_bacteria_patch()
@@ -76,6 +80,42 @@ class Environment:
         """Accumulate bacteria consumed by worms during the current timestep."""
         if dB_worm > 0.0:
             self.pending_worm_consumption += dB_worm
+
+    def __patch_profile(self, x_center, y_center, A_B, rho):
+        """Return spatial contribution of one patch using the same boundary model as the main patch."""
+        if A_B <= 0.0 or rho <= 0.0:
+            return np.zeros_like(self.x_grid, dtype=float)
+
+        radius = np.sqrt(A_B / np.pi)
+        dist = np.sqrt((self.x_grid - x_center) ** 2 + (self.y_grid - y_center) ** 2)
+        k = getattr(self, "boundary_k")
+
+        if k <= 0.0:
+            return np.where(dist <= radius, rho, 0.0)
+
+        return rho / (1.0 + np.exp(k * (dist - radius)))
+
+    def __total_bacteria_count(self):
+        total_main = self.A_B * self.rho
+        total_deposited = np.sum(self.deposited_map) * (self.dx ** 2)
+        return total_main + total_deposited
+
+    def __advance_patch_growth(self):
+        """Advance growth for the main patch only (deposited food does not grow)."""
+        self.A_B = self.__logistic_step(self.A_B, self.g_A, self.K_A)
+        self.rho = self.__logistic_step(self.rho, self.g_rho, self.K_rho)
+
+    def __apply_global_depletion(self, dB_feed):
+        """Apply total worm depletion proportionally across all patches by density scaling."""
+        B_before = self.__total_bacteria_count()
+        if B_before <= 0.0:
+            self.rho = 0.0
+            self.deposited_map.fill(0.0)
+            return
+
+        scale = max((B_before - dB_feed) / B_before, 0.0)
+        self.rho *= scale
+        self.deposited_map *= scale
 
     def __init_bacteria_patch(self):
         # """
@@ -98,12 +138,11 @@ class Environment:
                 large k -> sharp edge (current behaviour)
                 small k -> smooth falloff, worms sense gradient from distance
         """
-        R    = np.sqrt(self.A_B / np.pi)               # current patch radius (cm)
-        dist = np.sqrt(self.x_grid**2 + self.y_grid**2)
+        main_patch = self.__patch_profile(0.0, 0.0, self.A_B, self.rho)
+        bacteria_map = main_patch + self.deposited_map
 
-        # Sigmoid falloff — k controls sensing range
-        k = getattr(self, "boundary_k")          # cm^-1, tunable parameter
-        self.bacteria_map = self.rho / (1.0 + np.exp(k * (dist - R)))
+        # Keep normalised density bounded for motility/feed factors.
+        self.bacteria_map = np.minimum(bacteria_map, self.K_rho)
 
     def __update_bacteria_gradient(self):
         """
@@ -126,8 +165,12 @@ class Environment:
         return K * x / (x + (K - x) * exp_term)
 
     def feeding_rate(self):
-        A_B = self.A_B
-        rho = self.rho
+        deposited_area = np.count_nonzero(self.deposited_map > 0.0) * (self.dx ** 2)
+        A_B = self.A_B + deposited_area
+        if A_B <= 0.0:
+            return 0.0
+
+        rho = self.__total_bacteria_count() / A_B
         R = self.R
         
         if A_B <= 0.0 or rho <= 0.0:
@@ -162,11 +205,10 @@ class Environment:
         Advance A_B and rho by dt minutes using exact logistic solutions (S1, S2),
         then rebuild the spatial bacteria map.
         """
-        # 1) logistic growth
-        self.A_B = self.__logistic_step(self.A_B, self.g_A,   self.K_A)
-        self.rho = self.__logistic_step(self.rho,  self.g_rho, self.K_rho)
+        # 1) logistic growth for main + deposited patches
+        self.__advance_patch_growth()
         
-        B_before = self.A_B * self.rho
+        B_before = self.__total_bacteria_count()
         # 2) total bacteria before feeding
 
         # 3) feeding term from actual summed per-worm intake this step
@@ -174,30 +216,79 @@ class Environment:
         dB_feed_requested = self.pending_worm_consumption
         dB_feed = min(dB_feed_requested, B_before)
         self.pending_worm_consumption = 0.0
-        B_after = max(B_before - dB_feed, 0.0) # Ensure non-negative bacteria count after feeding
+        self.__apply_global_depletion(dB_feed)
+        B_after = self.__total_bacteria_count()
 
         self.B_before = B_before
         self.B_after = B_after
         self.dB_feed_requested = dB_feed_requested
         self.dB_feed = dB_feed
         self.F = F
-        B = B_after
+        self.num_deposited_patches = self._deposit_event_count
+        self.B_deposited = np.sum(self.deposited_map) * (self.dx ** 2)
 
-        # 4) update density from new total bacteria
-        if self.A_B > 0.0:
-            self.rho = B / self.A_B
-        else:
-            self.rho = 0.0
-
-        # 5) rebuild spatial map
+        # 4) rebuild spatial map from all active patches
         self.__init_bacteria_patch()
         
-        # 6) update gradient of normalised bacteria map
+        # 5) update gradient of normalised bacteria map
         self.__update_bacteria_gradient()
 
     def add_bacteria_source(self, x, y, amount):
-        """Deposits bacteria as a small patch at (x,y)"""
-        self.__init_bacteria_patch(x_center=x, y_center=y, radius=0.03, amplitude=amount)
+        """Add a non-growing local deposited food patch at (x, y) as edible density."""
+        dep_mult = max(float(getattr(self, "deposit_cells_multiplier", 1.0)), 0.0)
+        cells = float(amount) * dep_mult
+        if cells <= 0.0:
+            return
+
+        radius_cm = max(float(getattr(self, "deposit_patch_radius", 0.03)), 1e-9)
+        radius_px_cfg = int(getattr(self, "deposit_patch_radius_pixels", -1))
+        if radius_px_cfg >= 0:
+            radius_px = radius_px_cfg
+        else:
+            radius_px = max(int(np.ceil(radius_cm / self.dx)), 1)
+
+        x = float(np.clip(x, self.x_min, self.x_max))
+        y = float(np.clip(y, self.x_min, self.x_max))
+
+        col_center = int(np.clip(round((x - self.x_min) / self.dx), 0, self.x_grid.shape[1] - 1))
+        row_center = int(np.clip(round((y - self.x_min) / self.dx), 0, self.x_grid.shape[0] - 1))
+        half_width = max(radius_px, 1)
+
+        row0 = max(0, row_center - half_width)
+        row1 = min(self.x_grid.shape[0], row_center + half_width + 1)
+        col0 = max(0, col_center - half_width)
+        col1 = min(self.x_grid.shape[1], col_center + half_width + 1)
+
+        rr, cc = np.ogrid[row0:row1, col0:col1]
+        dist_px = np.sqrt((rr - row_center) ** 2 + (cc - col_center) ** 2)
+        mask = dist_px <= radius_px
+        if not np.any(mask):
+            mask = np.zeros_like(dist_px, dtype=bool)
+            mask[row_center - row0, col_center - col0] = True
+
+        # Radial kernel gives each drop a tiny patch-like profile in a few cells.
+        if radius_px > 0:
+            weights = np.clip(1.0 - (dist_px / (radius_px + 1e-12)), 0.0, None)
+        else:
+            weights = np.zeros_like(dist_px)
+            weights[row_center - row0, col_center - col0] = 1.0
+
+        weights *= mask
+        sum_w = float(np.sum(weights))
+        if sum_w <= 0.0:
+            weights = np.zeros_like(dist_px)
+            weights[row_center - row0, col_center - col0] = 1.0
+            sum_w = 1.0
+
+        delta_rho_per_weight = cells / ((self.dx ** 2) * sum_w)
+
+        patch_view = self.deposited_map[row0:row1, col0:col1]
+        patch_view[mask] = np.minimum(
+            patch_view[mask] + (delta_rho_per_weight * weights[mask]),
+            self.K_rho,
+        )
+
+        self._deposit_event_count += 1
 
     def convert_xy_to_index(self, xy):
         """Convert real coordinates (x or y) to grid indices"""
