@@ -25,6 +25,7 @@ config_opts = {
     "boundary_k" : [0],  # boundary sharpness of patch profile; larger => sharper edge (cm^-1)
     "feed_c" : [2.5e-9],  # feeding-response scale in F(A_B, rho, R) (approximately 1/cells)
     "feed_sigma" : [1000],  # shape/scale factor in psi term of global feeding function (unitless)
+    "feeding_cells_per_worm" : 70.0,  # paper a term: nominal feeding per worm (cells/min/worm)
     "patch_bnorm_threshold" : 0.01,  # threshold on local normalized density to classify on_patch (unitless)
     "local_feed_b_half" : 0.1,  # half-saturation normalized density for local Hill feeding (unitless)
     "local_feed_hill_n" : 2.0,  # Hill exponent controlling local feeding steepness (unitless)

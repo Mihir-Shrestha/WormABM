@@ -211,10 +211,23 @@ class Environment:
         B_before = self.__total_bacteria_count()
         # 2) total bacteria before feeding
 
-        # 3) feeding term from actual summed per-worm intake this step
+        # 3) paper-style global feeding term:
+        #    d_rho_feed = (a / A_B_eff) * F(A_B_eff, rho_eff, R) * W
+        #    dB_feed    = d_rho_feed * A_B_eff * dt
         F = self.feeding_rate()
-        dB_feed_requested = self.pending_worm_consumption
+        a_cells_per_min = max(float(getattr(self, "feeding_cells_per_worm", 70.0)), 0.0)
+        W = max(int(getattr(self, "num_worms", 0)), 0)
+        deposited_area = np.count_nonzero(self.deposited_map > 0.0) * (self.dx ** 2)
+        A_B_eff = self.A_B + deposited_area
+
+        if A_B_eff > 0.0 and a_cells_per_min > 0.0 and W > 0:
+            d_rho_feed = (a_cells_per_min / A_B_eff) * F * W
+            dB_feed_requested = d_rho_feed * A_B_eff * self.dt
+        else:
+            dB_feed_requested = 0.0
+
         dB_feed = min(dB_feed_requested, B_before)
+        # Reset legacy accumulator (no longer used for depletion).
         self.pending_worm_consumption = 0.0
         self.__apply_global_depletion(dB_feed)
         B_after = self.__total_bacteria_count()

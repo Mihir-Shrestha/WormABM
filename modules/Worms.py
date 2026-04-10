@@ -229,8 +229,9 @@ class Worm(object):
         self.surface_drop_step = 0.0
         self.gut_drop_step = 0.0
 
-        # --- per-worm feeding
-        rate_per_worm = 70.0
+        # --- local intake used for deposition bookkeeping
+        # Global environment depletion is handled by the paper-style term in Environment.
+        rate_per_worm = max(float(getattr(self, "feeding_cells_per_worm", 70.0)), 0.0)
         local_feed_factor = 0.0
         if self.on_patch:
             local_feed_factor = environment.feeding_rate_from_bnorm(b_norm)
@@ -239,7 +240,6 @@ class Worm(object):
             dB_worm = 0.0
         self.cells_eaten_step = dB_worm
         self.cells_eaten_total += dB_worm
-        environment.register_worm_consumption(dB_worm)
 
         if self.deposition_enabled:
             if self.surface_shedding_enabled and self.on_patch:
@@ -315,6 +315,10 @@ class Worm(object):
 
         # 2) Gut-drop events after consuming threshold amount
         if not self.gut_drop_enabled:
+            return
+
+        # Gut-drop deposition is allowed only outside the patch.
+        if self.on_patch:
             return
 
         events = 0

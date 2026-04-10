@@ -45,6 +45,7 @@ def config_options():
     parser.add_argument("--boundary_k", type=float)      # Boundary sharpness (cm^-1). Large (e.g. 100) = sharp ring, small (e.g. 2) = wide sensing range
     parser.add_argument("--feed_c", type=float)          # Amplitude of Gaussian food source (cells/cm^2). 0 means no food source.
     parser.add_argument("--feed_sigma", type=float)      # Width of Gaussian food source (
+    parser.add_argument("--feeding_cells_per_worm", type=float, default=70.0)
     parser.add_argument("--patch_bnorm_threshold", type=float, default=0.01)
     parser.add_argument("--local_feed_b_half", type=float, default=0.1)
     parser.add_argument("--local_feed_hill_n", type=float, default=2.0)
@@ -158,6 +159,7 @@ def world_parameters(cfg, model_dir):
         "num_worms": cfg.num_worms,
         "feed_c": cfg.feed_c,
         "feed_sigma": cfg.feed_sigma,
+        "feeding_cells_per_worm": cfg.feeding_cells_per_worm,
         "patch_bnorm_threshold": cfg.patch_bnorm_threshold,
         "local_feed_b_half": cfg.local_feed_b_half,
         "local_feed_hill_n": cfg.local_feed_hill_n,
@@ -177,6 +179,7 @@ def world_parameters(cfg, model_dir):
         "beta_b": cfg.beta_b,
         "chi_theta": cfg.chi_theta,
         "dtheta": cfg.dtheta,
+        "feeding_cells_per_worm": cfg.feeding_cells_per_worm,
         # Bacteria dropping parameters
         "bacteria_enabled": cfg.bacteria_enabled,
         "bacteria_drop_interval": cfg.bacteria_drop_interval,
