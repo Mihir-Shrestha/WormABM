@@ -240,6 +240,7 @@ class Worm(object):
             dB_worm = 0.0
         self.cells_eaten_step = dB_worm
         self.cells_eaten_total += dB_worm
+        environment.register_feeding_worm(self.on_patch)
 
         if self.deposition_enabled:
             if self.surface_shedding_enabled and self.on_patch:
