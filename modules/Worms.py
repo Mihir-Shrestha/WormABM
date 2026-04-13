@@ -65,6 +65,8 @@ class Worm(object):
         self.gut_drop_jitter_radius = max(float(getattr(self, "gut_drop_jitter_radius", 0.05)), 0.0)
         self.gut_drop_max_events_per_step = max(int(getattr(self, "gut_drop_max_events_per_step", 5)), 1)
         self._gut_drop_release_queue = deque()
+        self.single_deposit_per_worm = bool(getattr(self, "single_deposit_per_worm", True))
+        self.has_deposited_once = False
     
     # ------------------------------------------------------------------
     # Initialisation
@@ -132,8 +134,12 @@ class Worm(object):
         row = int(np.clip(
             round((self.y - environment.x_min) / dx), 0, ny - 1))
 
-        # Normalised density at worm position
-        b_norm = bmap[row, col] / K
+        # Local and normalised density at worm position
+        b_local = bmap[row, col]
+        if K > 0.0:
+            b_norm = b_local / K
+        else:
+            b_norm = 0.0
 
         # Gradient of normalised bacteria map, precomputed once per timestep
         grad_bn_x = environment.grad_bn_x[row, col]  # d b_norm / dx
@@ -141,8 +147,8 @@ class Worm(object):
 
         grad_bn = np.array([grad_bn_x, grad_bn_y])
 
-        # On-patch uses an explicit b_norm threshold to avoid treating tiny tails as patch.
-        self.on_patch = environment.is_on_patch(b_norm)
+        # On-patch uses an absolute concentration check so low-density regimes still count as source.
+        self.on_patch = environment.is_on_patch(b_local)
 
         return b_norm, grad_bn
     
@@ -231,11 +237,10 @@ class Worm(object):
 
         # --- local intake used for deposition bookkeeping
         # Global environment depletion is handled by the paper-style term in Environment.
+        # Intensity is constant per feeding worm (paper a term), gated only by on_patch.
         rate_per_worm = max(float(getattr(self, "feeding_cells_per_worm", 70.0)), 0.0)
-        local_feed_factor = 0.0
         if self.on_patch:
-            local_feed_factor = environment.feeding_rate_from_bnorm(b_norm)
-            dB_worm = local_feed_factor * rate_per_worm * dt
+            dB_worm = rate_per_worm * dt
         else:
             dB_worm = 0.0
         self.cells_eaten_step = dB_worm
@@ -243,11 +248,11 @@ class Worm(object):
         environment.register_feeding_worm(self.on_patch)
 
         if self.deposition_enabled:
-            if self.surface_shedding_enabled and self.on_patch:
-                pickup = self.surface_pickup_rate * local_feed_factor * dt
+            if (not self.single_deposit_per_worm) and self.surface_shedding_enabled and self.on_patch:
+                pickup = self.surface_pickup_rate * dt
                 self.surface_cells_carried = min(self.surface_cells_carried + pickup, self.surface_carry_capacity)
 
-            if self.gut_drop_enabled and self.deposition_fraction > 0.0:
+            if self.gut_drop_enabled and self.deposition_fraction > 0.0 and (not self.has_deposited_once):
                 delayed_cells = self.deposition_fraction * dB_worm
                 release_step = self.timestep + self.gut_drop_delay_steps
                 self._gut_drop_release_queue.append((release_step, delayed_cells))
@@ -296,6 +301,23 @@ class Worm(object):
     def __drop_bacteria(self, environment):
         """Deposit via two pathways: random surface shedding and threshold-triggered drop."""
         if not self.deposition_enabled:
+            return
+
+        if self.single_deposit_per_worm:
+            if self.has_deposited_once or not self.gut_drop_enabled:
+                return
+
+            if self.gut_cells_for_drop < self.gut_drop_trigger_cells:
+                return
+
+            # One-time drop: convert currently available gut reservoir into one deposited source patch.
+            amount = self.gut_cells_for_drop * self.gut_drop_conversion_fraction
+            dropped = self.__deposit_with_jitter(environment, amount, self.gut_drop_jitter_radius)
+            if dropped > 0.0:
+                self.gut_cells_for_drop = 0.0
+                self.gut_drop_step += dropped
+                self.gut_drop_total += dropped
+                self.has_deposited_once = True
             return
 
         # 1) Surface shedding at random intervals

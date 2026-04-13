@@ -18,21 +18,22 @@ config_opts = {
     # Bacteria ODE parameters (Eqs. S1 & S2, Table S1)
     "g_A"   : 1.13e-4,  # logistic growth rate of patch area A_B (min^-1)
     "g_rho" : 1.07e-3,  # logistic growth rate of density rho (min^-1)
-    "K_rho" : 4.58e8,  # carrying capacity for bacteria density (cells/cm^2)
+    "K_rho" : 4.58e6,  # carrying capacity for bacteria density (cells/cm^2)
     # "K_A" : [np.pi*2*2, np.pi*25*25],
     "A_B_0" : np.pi * 0.5 * 0.5,  # initial patch area (cm^2)
-    "rho_0" : 1.27e8,  # initial patch density (cells/cm^2)
+    "rho_0" : 1.27e6,  # initial patch density (cells/cm^2)
     "boundary_k" : [0],  # boundary sharpness of patch profile; larger => sharper edge (cm^-1)
     "feed_c" : [2.5e-9],  # feeding-response scale in F(A_B, rho, R) (approximately 1/cells)
     "feed_sigma" : [1000],  # shape/scale factor in psi term of global feeding function (unitless)
     "feeding_cells_per_worm" : 70.0,  # paper a term: nominal feeding per worm (cells/min/worm)
-    "patch_bnorm_threshold" : 0.01,  # threshold on local normalized density to classify on_patch (unitless)
-    "local_feed_b_half" : 0.1,  # half-saturation normalized density for local Hill feeding (unitless)
-    "local_feed_hill_n" : 2.0,  # Hill exponent controlling local feeding steepness (unitless)
+    "patch_bnorm_threshold" : 0.01,  # legacy threshold on local normalized density (currently unused)
+    "on_patch_density_epsilon" : 1e-12,  # classify on-source when local absolute density is above this tiny floor (cells/cm^2)
+    "local_feed_b_half" : 0.1,  # legacy local-feeding parameter (currently unused)
+    "local_feed_hill_n" : 2.0,  # legacy local-feeding parameter (currently unused)
     "movie_min_density_factor" : 0.01,  # visualization floor as fraction of rho_0 (unitless)
     "deposit_patch_radius" : 0.05,  # physical radius of deposition kernel if pixel radius not forced (cm)
     "deposit_patch_radius_pixels" : 0,  # deposition kernel radius in grid cells; >=0 overrides physical radius (pixels)
-    "deposit_cells_multiplier" : 1000.0,  # multiplier converting dropped amount to deposited-map cells (unitless)
+    "deposit_cells_multiplier" : 1.0,  # multiplier converting dropped amount to deposited-map cells (unitless)
     "deposit_merge_distance" : 0.03,  # legacy merge-distance knob for deposited spots (cm)
 
     # Worm SDE motility parameters
@@ -49,8 +50,8 @@ config_opts = {
     "deposition_fraction" : 1.0,  # fraction of eaten cells routed toward delayed gut-drop intake (unitless)
     "deposition_interval_steps" : 5,  # legacy deposition interval setting (timesteps)
     "deposition_max_per_event" : 0.0,  # legacy max per event; <=0 disables cap (cells/event)
-    "surface_shedding_enabled" : 1,  # enable surface-shedding pathway (0/1)
-    "surface_pickup_rate" : 8.0,  # carried-load pickup rate on patch, scaled by local feeding (cells/min)
+    "surface_shedding_enabled" : 0,  # enable surface-shedding pathway (0/1); typically off for one-drop-per-worm experiments
+    "surface_pickup_rate" : 8.0,  # carried-load pickup rate on patch (cells/min)
     "surface_carry_capacity" : 40.0,  # max carried load available for shedding (cells)
     "surface_shed_mean_steps" : 300,  # mean waiting time between shedding opportunities (timesteps)
     "surface_shed_fraction_min" : 0.02,  # minimum random fraction shed per shedding event (unitless)
@@ -63,6 +64,7 @@ config_opts = {
     "gut_drop_delay_steps" : 5000,  # delay from intake to gut availability for dropping (timesteps)
     "gut_drop_jitter_radius" : 0.05,  # random spatial offset radius for gut-drop location (cm)
     "gut_drop_max_events_per_step" : 5,  # maximum gut-drop events processed in one timestep (events/step)
+    "single_deposit_per_worm" : 1,  # one-time deposition mode: each worm can create at most one deposited patch (0/1)
 
     # Legacy (kept for compatibility)
     # "bacteria_enabled" : False,

@@ -47,6 +47,7 @@ def config_options():
     parser.add_argument("--feed_sigma", type=float)      # Width of Gaussian food source (
     parser.add_argument("--feeding_cells_per_worm", type=float, default=70.0)
     parser.add_argument("--patch_bnorm_threshold", type=float, default=0.01)
+    parser.add_argument("--on_patch_density_epsilon", type=float, default=1e-12)
     parser.add_argument("--local_feed_b_half", type=float, default=0.1)
     parser.add_argument("--local_feed_hill_n", type=float, default=2.0)
     parser.add_argument("--movie_min_density_factor", type=float, default=0.1)
@@ -87,6 +88,7 @@ def config_options():
     parser.add_argument("--gut_drop_delay_steps", type=int, default=1000)
     parser.add_argument("--gut_drop_jitter_radius", type=float, default=0.05)
     parser.add_argument("--gut_drop_max_events_per_step", type=int, default=5)
+    parser.add_argument("--single_deposit_per_worm", type=int, default=1)
 
     # Config file
     parser.add_argument("--file", type=open, action=LoadFromFile)
@@ -161,6 +163,7 @@ def world_parameters(cfg, model_dir):
         "feed_sigma": cfg.feed_sigma,
         "feeding_cells_per_worm": cfg.feeding_cells_per_worm,
         "patch_bnorm_threshold": cfg.patch_bnorm_threshold,
+        "on_patch_density_epsilon": cfg.on_patch_density_epsilon,
         "local_feed_b_half": cfg.local_feed_b_half,
         "local_feed_hill_n": cfg.local_feed_hill_n,
         "movie_min_density_factor": cfg.movie_min_density_factor,
@@ -202,6 +205,7 @@ def world_parameters(cfg, model_dir):
         "gut_drop_delay_steps": cfg.gut_drop_delay_steps,
         "gut_drop_jitter_radius": cfg.gut_drop_jitter_radius,
         "gut_drop_max_events_per_step": cfg.gut_drop_max_events_per_step,
+        "single_deposit_per_worm": bool(cfg.single_deposit_per_worm),
     }
 
     world_params = {

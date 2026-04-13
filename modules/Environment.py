@@ -3,10 +3,10 @@ import numpy as np
 class Environment:
     """
     Environment containing:
-      1. A single circular bacterial patch governed by logistic ODEs (S1, S2):
+    1. Multiple circular bacterial patches, each governed by logistic ODEs (S1, S2):
             dA_B/dt  = g_A   * A_B * (1 - A_B  / K_A)
             drho/dt  = g_rho * rho * (1 - rho   / K_rho)
-      2. A 2D spatial bacteria_map grid (density rho inside patch, 0 outside)
+    2. A 2D spatial bacteria_map grid from the sum of all active patches
       3. A time-course grid
     """
 
@@ -54,10 +54,12 @@ class Environment:
         self.K_A   = np.pi * self.R**2           # cm^2, area carrying capacity (derived from plate radius)
         self.K_rho = getattr(self, "K_rho")            # cells/cm^2
         self.patch_bnorm_threshold = getattr(self, "patch_bnorm_threshold", 0.01)
+        self.on_patch_density_epsilon = max(float(getattr(self, "on_patch_density_epsilon", 1e-12)), 0.0)
 
         # Scalar ODE state variables
         self.A_B = getattr(self, "A_B_0")      # cm^2
         self.rho = getattr(self, "rho_0")               # cells/cm^2
+        self.patches = [self.__make_patch(0.0, 0.0, self.A_B, self.rho, is_initial=True)]
         self.deposited_map = np.zeros_like(self.x_grid, dtype=float)
         self._deposit_event_count = 0
         self.num_deposited_patches = 0
@@ -73,9 +75,28 @@ class Environment:
         self.pending_feeding_worms = 0
         self.dB_feed_requested = 0.0
 
-    def is_on_patch(self, b_norm):
-        """Return True when local normalised bacteria is high enough to count as patch."""
-        return b_norm >= self.patch_bnorm_threshold
+    def __make_patch(self, x, y, A_B, rho, is_initial=False):
+        """Create one independent patch state that follows the same ODEs as the main patch."""
+        return {
+            "x": float(np.clip(x, self.x_min, self.x_max)),
+            "y": float(np.clip(y, self.x_min, self.x_max)),
+            "A_B": max(float(A_B), 0.0),
+            "rho": max(float(rho), 0.0),
+            "is_initial": bool(is_initial),
+        }
+
+    def __sync_legacy_scalars(self):
+        """Maintain legacy scalar fields from the initial patch for compatibility with existing outputs."""
+        if not self.patches:
+            self.A_B = 0.0
+            self.rho = 0.0
+            return
+        self.A_B = self.patches[0]["A_B"]
+        self.rho = self.patches[0]["rho"]
+
+    def is_on_patch(self, local_density):
+        """Return True when local absolute bacteria density is above a tiny epsilon."""
+        return float(local_density) > self.on_patch_density_epsilon
 
     def register_worm_consumption(self, dB_worm):
         """Accumulate bacteria consumed by worms during the current timestep."""
@@ -102,26 +123,31 @@ class Environment:
         return rho / (1.0 + np.exp(k * (dist - radius)))
 
     def __total_bacteria_count(self):
-        total_main = self.A_B * self.rho
-        total_deposited = np.sum(self.deposited_map) * (self.dx ** 2)
-        return total_main + total_deposited
+        return sum(p["A_B"] * p["rho"] for p in self.patches)
+
+    def __total_patch_area(self):
+        return sum(p["A_B"] for p in self.patches)
 
     def __advance_patch_growth(self):
-        """Advance growth for the main patch only (deposited food does not grow)."""
-        self.A_B = self.__logistic_step(self.A_B, self.g_A, self.K_A)
-        self.rho = self.__logistic_step(self.rho, self.g_rho, self.K_rho)
+        """Advance growth for every patch independently using the same ODEs."""
+        for patch in self.patches:
+            patch["A_B"] = self.__logistic_step(patch["A_B"], self.g_A, self.K_A)
+            patch["rho"] = self.__logistic_step(patch["rho"], self.g_rho, self.K_rho)
+        self.__sync_legacy_scalars()
 
     def __apply_global_depletion(self, dB_feed):
         """Apply total worm depletion proportionally across all patches by density scaling."""
         B_before = self.__total_bacteria_count()
         if B_before <= 0.0:
-            self.rho = 0.0
-            self.deposited_map.fill(0.0)
+            for patch in self.patches:
+                patch["rho"] = 0.0
+            self.__sync_legacy_scalars()
             return
 
         scale = max((B_before - dB_feed) / B_before, 0.0)
-        self.rho *= scale
-        self.deposited_map *= scale
+        for patch in self.patches:
+            patch["rho"] *= scale
+        self.__sync_legacy_scalars()
 
     def __init_bacteria_patch(self):
         # """
@@ -144,11 +170,18 @@ class Environment:
                 large k -> sharp edge (current behaviour)
                 small k -> smooth falloff, worms sense gradient from distance
         """
-        main_patch = self.__patch_profile(0.0, 0.0, self.A_B, self.rho)
-        bacteria_map = main_patch + self.deposited_map
+        bacteria_map = np.zeros_like(self.x_grid, dtype=float)
+        deposited_map = np.zeros_like(self.x_grid, dtype=float)
+        for i, patch in enumerate(self.patches):
+            profile = self.__patch_profile(patch["x"], patch["y"], patch["A_B"], patch["rho"])
+            bacteria_map += profile
+            if i > 0:
+                deposited_map += profile
 
         # Keep normalised density bounded for motility/feed factors.
+        self.deposited_map = np.minimum(deposited_map, self.K_rho)
         self.bacteria_map = np.minimum(bacteria_map, self.K_rho)
+        self.__sync_legacy_scalars()
 
     def __update_bacteria_gradient(self):
         """
@@ -171,8 +204,7 @@ class Environment:
         return K * x / (x + (K - x) * exp_term)
 
     def feeding_rate(self):
-        deposited_area = np.count_nonzero(self.deposited_map > 0.0) * (self.dx ** 2)
-        A_B = self.A_B + deposited_area
+        A_B = self.__total_patch_area()
         if A_B <= 0.0:
             return 0.0
 
@@ -190,8 +222,9 @@ class Environment:
 
     def feeding_rate_from_bnorm(self, b_norm):
         """
-        Local feeding modulation from normalised concentration at worm position.
-        Returns a factor in [0, 1] used to scale the 70 cells/min per-worm baseline.
+        Legacy local Hill feeding helper (currently not used in active simulation).
+        The active model now uses paper-style global depletion with constant a
+        per active feeding worm via W_eff.
         """
         b = max(float(b_norm), 0.0)
         b_half = getattr(self, "local_feed_b_half", 0.1)
@@ -223,8 +256,7 @@ class Environment:
         F = self.feeding_rate()
         a_cells_per_min = max(float(getattr(self, "feeding_cells_per_worm", 70.0)), 0.0)
         W_eff = int(np.clip(self.pending_feeding_worms, 0, int(getattr(self, "num_worms", 0))))
-        deposited_area = np.count_nonzero(self.deposited_map > 0.0) * (self.dx ** 2)
-        A_B_eff = self.A_B + deposited_area
+        A_B_eff = self.__total_patch_area()
 
         if A_B_eff > 0.0 and a_cells_per_min > 0.0 and W_eff > 0:
             d_rho_feed = (a_cells_per_min / A_B_eff) * F * W_eff
@@ -244,8 +276,8 @@ class Environment:
         self.dB_feed_requested = dB_feed_requested
         self.dB_feed = dB_feed
         self.F = F
-        self.num_deposited_patches = self._deposit_event_count
-        self.B_deposited = np.sum(self.deposited_map) * (self.dx ** 2)
+        self.num_deposited_patches = max(len(self.patches) - 1, 0)
+        self.B_deposited = sum(p["A_B"] * p["rho"] for p in self.patches[1:])
 
         # 4) rebuild spatial map from all active patches
         self.__init_bacteria_patch()
@@ -254,7 +286,7 @@ class Environment:
         self.__update_bacteria_gradient()
 
     def add_bacteria_source(self, x, y, amount):
-        """Add a non-growing local deposited food patch at (x, y) as edible density."""
+        """Add a new deposited source patch with its own independent ODE state."""
         dep_mult = max(float(getattr(self, "deposit_cells_multiplier", 1.0)), 0.0)
         cells = float(amount) * dep_mult
         if cells <= 0.0:
@@ -263,50 +295,22 @@ class Environment:
         radius_cm = max(float(getattr(self, "deposit_patch_radius", 0.03)), 1e-9)
         radius_px_cfg = int(getattr(self, "deposit_patch_radius_pixels", -1))
         if radius_px_cfg >= 0:
-            radius_px = radius_px_cfg
-        else:
-            radius_px = max(int(np.ceil(radius_cm / self.dx)), 1)
+            radius_px = max(radius_px_cfg, 1)
+            radius_cm = max(radius_px * self.dx, 1e-9)
 
         x = float(np.clip(x, self.x_min, self.x_max))
         y = float(np.clip(y, self.x_min, self.x_max))
 
-        col_center = int(np.clip(round((x - self.x_min) / self.dx), 0, self.x_grid.shape[1] - 1))
-        row_center = int(np.clip(round((y - self.x_min) / self.dx), 0, self.x_grid.shape[0] - 1))
-        half_width = max(radius_px, 1)
+        A_init = np.pi * (radius_cm ** 2)
+        if A_init <= 0.0:
+            return
 
-        row0 = max(0, row_center - half_width)
-        row1 = min(self.x_grid.shape[0], row_center + half_width + 1)
-        col0 = max(0, col_center - half_width)
-        col1 = min(self.x_grid.shape[1], col_center + half_width + 1)
+        rho_init = cells / A_init
+        if rho_init > self.K_rho:
+            rho_init = self.K_rho
+            A_init = cells / max(self.K_rho, 1e-12)
 
-        rr, cc = np.ogrid[row0:row1, col0:col1]
-        dist_px = np.sqrt((rr - row_center) ** 2 + (cc - col_center) ** 2)
-        mask = dist_px <= radius_px
-        if not np.any(mask):
-            mask = np.zeros_like(dist_px, dtype=bool)
-            mask[row_center - row0, col_center - col0] = True
-
-        # Radial kernel gives each drop a tiny patch-like profile in a few cells.
-        if radius_px > 0:
-            weights = np.clip(1.0 - (dist_px / (radius_px + 1e-12)), 0.0, None)
-        else:
-            weights = np.zeros_like(dist_px)
-            weights[row_center - row0, col_center - col0] = 1.0
-
-        weights *= mask
-        sum_w = float(np.sum(weights))
-        if sum_w <= 0.0:
-            weights = np.zeros_like(dist_px)
-            weights[row_center - row0, col_center - col0] = 1.0
-            sum_w = 1.0
-
-        delta_rho_per_weight = cells / ((self.dx ** 2) * sum_w)
-
-        patch_view = self.deposited_map[row0:row1, col0:col1]
-        patch_view[mask] = np.minimum(
-            patch_view[mask] + (delta_rho_per_weight * weights[mask]),
-            self.K_rho,
-        )
+        self.patches.append(self.__make_patch(x, y, A_init, rho_init, is_initial=False))
 
         self._deposit_event_count += 1
 
