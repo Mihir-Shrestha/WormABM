@@ -122,6 +122,33 @@ class Environment:
 
         return rho / (1.0 + np.exp(k * (dist - radius)))
 
+    def __paint_hard_patch_local(self, target_map, x_center, y_center, A_B, rho):
+        """Paint a hard-edged circular patch into a local window to reduce per-step cost."""
+        if A_B <= 0.0 or rho <= 0.0:
+            return
+
+        radius = np.sqrt(A_B / np.pi)
+        if radius <= 0.0:
+            return
+
+        col_center = int(np.clip(round((x_center - self.x_min) / self.dx), 0, self.x_grid.shape[1] - 1))
+        row_center = int(np.clip(round((y_center - self.x_min) / self.dx), 0, self.x_grid.shape[0] - 1))
+        half_width = max(int(np.ceil(radius / self.dx)), 1)
+
+        row0 = max(0, row_center - half_width)
+        row1 = min(self.x_grid.shape[0], row_center + half_width + 1)
+        col0 = max(0, col_center - half_width)
+        col1 = min(self.x_grid.shape[1], col_center + half_width + 1)
+
+        xs = self.x_grid[row0:row1, col0:col1] - x_center
+        ys = self.y_grid[row0:row1, col0:col1] - y_center
+        mask = (xs * xs + ys * ys) <= (radius * radius)
+        if not np.any(mask):
+            return
+
+        local_view = target_map[row0:row1, col0:col1]
+        local_view[mask] += rho
+
     def __total_bacteria_count(self):
         return sum(p["A_B"] * p["rho"] for p in self.patches)
 
@@ -129,10 +156,9 @@ class Environment:
         return sum(p["A_B"] for p in self.patches)
 
     def __advance_patch_growth(self):
-        """Advance growth for every patch independently using the same ODEs."""
+        """Advance patch area growth; density is updated by the coupled rho ODE in update_bacteria_map."""
         for patch in self.patches:
             patch["A_B"] = self.__logistic_step(patch["A_B"], self.g_A, self.K_A)
-            patch["rho"] = self.__logistic_step(patch["rho"], self.g_rho, self.K_rho)
         self.__sync_legacy_scalars()
 
     def __apply_global_depletion(self, dB_feed):
@@ -172,11 +198,29 @@ class Environment:
         """
         bacteria_map = np.zeros_like(self.x_grid, dtype=float)
         deposited_map = np.zeros_like(self.x_grid, dtype=float)
+        hard_boundary = float(getattr(self, "boundary_k", 0.0)) <= 0.0
         for i, patch in enumerate(self.patches):
-            profile = self.__patch_profile(patch["x"], patch["y"], patch["A_B"], patch["rho"])
-            bacteria_map += profile
-            if i > 0:
-                deposited_map += profile
+            if hard_boundary:
+                self.__paint_hard_patch_local(
+                    bacteria_map,
+                    patch["x"],
+                    patch["y"],
+                    patch["A_B"],
+                    patch["rho"],
+                )
+                if i > 0:
+                    self.__paint_hard_patch_local(
+                        deposited_map,
+                        patch["x"],
+                        patch["y"],
+                        patch["A_B"],
+                        patch["rho"],
+                    )
+            else:
+                profile = self.__patch_profile(patch["x"], patch["y"], patch["A_B"], patch["rho"])
+                bacteria_map += profile
+                if i > 0:
+                    deposited_map += profile
 
         # Keep normalised density bounded for motility/feed factors.
         self.deposited_map = np.minimum(deposited_map, self.K_rho)
@@ -241,34 +285,53 @@ class Environment:
 
     def update_bacteria_map(self):
         """
-        Advance A_B and rho by dt minutes using exact logistic solutions (S1, S2),
-        then rebuild the spatial bacteria map.
-        """
-        # 1) logistic growth for main + deposited patches
-        self.__advance_patch_growth()
-        
-        B_before = self.__total_bacteria_count()
-        # 2) total bacteria before feeding
+        Advance area and density, then rebuild the spatial bacteria map.
 
-        # 3) paper-style global feeding term with active feeders:
-        #    d_rho_feed = (a / A_B_eff) * F(A_B_eff, rho_eff, R) * W_eff
-        #    dB_feed    = d_rho_feed * A_B_eff * dt
-        F = self.feeding_rate()
+        Area is still advanced with exact logistic steps.
+        Density follows a single coupled paper-style ODE term each timestep:
+            d(rho)/dt = g_rho * rho * (1 - rho/K_rho) - (a/A_B) * F(A_B, rho, R) * W
+        """
+        # 1) area growth for main + deposited patches
+        self.__advance_patch_growth()
+
+        B_before = self.__total_bacteria_count()
+        A_B_eff = self.__total_patch_area()
+        rho_eff = (B_before / A_B_eff) if A_B_eff > 0.0 else 0.0
+
+        # 2) coupled paper-style rho ODE over one Euler step
+        # F = self.feeding_rate()
+        F = 1
         a_cells_per_min = max(float(getattr(self, "feeding_cells_per_worm", 70.0)), 0.0)
         W_eff = int(np.clip(self.pending_feeding_worms, 0, int(getattr(self, "num_worms", 0))))
-        A_B_eff = self.__total_patch_area()
-
-        if A_B_eff > 0.0 and a_cells_per_min > 0.0 and W_eff > 0:
+        if A_B_eff > 0.0 and rho_eff > 0.0 and a_cells_per_min > 0.0 and W_eff > 0:
             d_rho_feed = (a_cells_per_min / A_B_eff) * F * W_eff
-            dB_feed_requested = d_rho_feed * A_B_eff * self.dt
         else:
-            dB_feed_requested = 0.0
+            d_rho_feed = 0.0
 
-        dB_feed = min(dB_feed_requested, B_before)
+        if self.K_rho > 0.0 and rho_eff > 0.0:
+            d_rho_growth = self.g_rho * rho_eff * (1.0 - (rho_eff / self.K_rho))
+        else:
+            d_rho_growth = 0.0
+
+        rho_eff_new = rho_eff + (d_rho_growth - d_rho_feed) * self.dt
+        rho_eff_new = float(np.clip(rho_eff_new, 0.0, self.K_rho if self.K_rho > 0.0 else np.inf))
+
+        if rho_eff <= 0.0:
+            for patch in self.patches:
+                patch["rho"] = 0.0
+        else:
+            scale = rho_eff_new / rho_eff
+            for patch in self.patches:
+                patch["rho"] = float(np.clip(patch["rho"] * scale, 0.0, self.K_rho))
+
+        dB_feed_requested = d_rho_feed * A_B_eff * self.dt
+        dB_feed_available = max(B_before + (d_rho_growth * A_B_eff * self.dt), 0.0)
+        dB_feed = min(dB_feed_requested, dB_feed_available)
+
         # Reset legacy accumulator (no longer used for depletion).
         self.pending_worm_consumption = 0.0
         self.pending_feeding_worms = 0
-        self.__apply_global_depletion(dB_feed)
+        self.__sync_legacy_scalars()
         B_after = self.__total_bacteria_count()
 
         self.B_before = B_before

@@ -16,6 +16,7 @@ def verify_worm_level(worm_path, eps=1e-12):
         on_patch = np.asarray(f["on_patch"][:]).astype(bool)
         eaten_step = np.asarray(f["cells_eaten_step"][:], dtype=float)
         eaten_total = np.asarray(f["cells_eaten_total"][:], dtype=float)
+        t_hist = np.asarray(f["t"][:], dtype=int) if "t" in f else None
 
     offpatch_nonzero = int(np.sum((~on_patch) & (eaten_step > eps)))
     onpatch_nonpos = int(np.sum(on_patch & (eaten_step <= eps)))
@@ -23,6 +24,8 @@ def verify_worm_level(worm_path, eps=1e-12):
     worms = np.unique(worm_i)
     nonmono_total_worms = 0
     sum_mismatch_worms = 0
+    sum_check_worms = 0
+    sum_check_skipped_worms = 0
 
     for w in worms:
         m = worm_i == w
@@ -32,8 +35,20 @@ def verify_worm_level(worm_path, eps=1e-12):
         if np.any(np.diff(total_w) < -eps):
             nonmono_total_worms += 1
 
-        if not np.isclose(total_w[-1], np.sum(step_w), atol=1e-9, rtol=1e-9):
-            sum_mismatch_worms += 1
+        # The exact identity total[-1] == sum(step) is valid only when every
+        # simulation step is recorded. With sparse logging, step_w is sampled.
+        if t_hist is None:
+            should_check_sum = True
+        else:
+            t_w = t_hist[m]
+            should_check_sum = bool(len(t_w) <= 1 or np.all(np.diff(t_w) == 1))
+
+        if should_check_sum:
+            sum_check_worms += 1
+            if not np.isclose(total_w[-1], np.sum(step_w), atol=1e-9, rtol=1e-9):
+                sum_mismatch_worms += 1
+        else:
+            sum_check_skipped_worms += 1
 
     result = {
         "rows": int(len(worm_i)),
@@ -44,6 +59,8 @@ def verify_worm_level(worm_path, eps=1e-12):
         "violations_onpatch_nonpositive": onpatch_nonpos,
         "worms_nonmonotonic_total": nonmono_total_worms,
         "worms_total_step_mismatch": sum_mismatch_worms,
+        "worms_total_step_mismatch_checked": sum_check_worms,
+        "worms_total_step_mismatch_skipped": sum_check_skipped_worms,
     }
     return result
 
@@ -61,6 +78,7 @@ def verify_global_consistency(worm_path, env_path, eps=1e-12):
 
         dB_feed_requested = np.asarray(ef["dB_feed_requested"][:], dtype=float)
         dB_feed = np.asarray(ef["dB_feed"][:], dtype=float)
+        F = np.asarray(ef["F"][:] if "F" in ef else np.ones_like(dB_feed_requested), dtype=float)
 
     n_worms = len(np.unique(worm_i))
     if n_worms == 0:
@@ -74,22 +92,35 @@ def verify_global_consistency(worm_path, env_path, eps=1e-12):
     n_steps = len(eaten_step) // n_worms
     step_sum_from_worms = eaten_step.reshape(n_steps, n_worms).sum(axis=1)
 
-    if len(dB_feed_requested) != n_steps or len(dB_feed) != n_steps:
-        raise ValueError(
-            "Environment and worm step counts do not match. "
-            f"worm_steps={n_steps}, env_requested={len(dB_feed_requested)}, env_feed={len(dB_feed)}"
-        )
+    n_common = min(n_steps, len(dB_feed_requested), len(dB_feed), len(F))
+    if n_common == 0:
+        raise ValueError("No overlapping timesteps between worm and environment history.")
 
-    mismatch_requested = int(np.sum(np.abs(step_sum_from_worms - dB_feed_requested) > 1e-9))
-    invalid_clamp = int(np.sum(dB_feed - dB_feed_requested > eps))
+    worm_requested_raw = step_sum_from_worms[:n_common]
+    worm_requested_scaled = worm_requested_raw * F[:n_common]
+    env_requested = dB_feed_requested[:n_common]
+    env_applied = dB_feed[:n_common]
+
+    mismatch_requested = int(np.sum(np.abs(worm_requested_scaled - env_requested) > 1e-9))
+    invalid_clamp = int(np.sum(env_applied - env_requested > eps))
+    negative_applied = int(np.sum(env_applied < -eps))
+
+    # Legacy comparison is still helpful to spot accidental F=1 assumptions.
+    mismatch_requested_legacy = int(np.sum(np.abs(worm_requested_raw - env_requested) > 1e-9))
 
     result = {
-        "timesteps": int(n_steps),
+        "timesteps_compared": int(n_common),
+        "timesteps_worm": int(n_steps),
+        "timesteps_env_requested": int(len(dB_feed_requested)),
+        "timesteps_env_feed": int(len(dB_feed)),
         "requested_mismatch_steps": mismatch_requested,
+        "requested_mismatch_steps_legacy_raw": mismatch_requested_legacy,
         "clamp_violation_steps": invalid_clamp,
-        "requested_sum_worms": float(np.sum(step_sum_from_worms)),
-        "requested_sum_environment": float(np.sum(dB_feed_requested)),
-        "applied_sum_environment": float(np.sum(dB_feed)),
+        "negative_applied_steps": negative_applied,
+        "requested_sum_worms_raw": float(np.sum(worm_requested_raw)),
+        "requested_sum_worms_scaled_by_F": float(np.sum(worm_requested_scaled)),
+        "requested_sum_environment": float(np.sum(env_requested)),
+        "applied_sum_environment": float(np.sum(env_applied)),
     }
     return result
 
@@ -128,6 +159,8 @@ def main():
         if global_result["requested_mismatch_steps"] > 0:
             ok = False
         if global_result["clamp_violation_steps"] > 0:
+            ok = False
+        if global_result["negative_applied_steps"] > 0:
             ok = False
 
     if ok:

@@ -30,8 +30,8 @@ config_opts = {
     "on_patch_density_epsilon" : 1e-12,  # classify on-source when local absolute density is above this tiny floor (cells/cm^2)
     "local_feed_b_half" : 0.1,  # legacy local-feeding parameter (currently unused)
     "local_feed_hill_n" : 2.0,  # legacy local-feeding parameter (currently unused)
-    "movie_min_density_factor" : 0.01,  # visualization floor as fraction of rho_0 (unitless)
-    "deposit_patch_radius" : 0.05,  # physical radius of deposition kernel if pixel radius not forced (cm)
+    "movie_min_density_factor" : 0.0001,  # visualization floor as fraction of rho_0 (unitless)
+    "deposit_patch_radius" : 0.1,  # physical radius of deposition kernel if pixel radius not forced (cm)
     "deposit_patch_radius_pixels" : 0,  # deposition kernel radius in grid cells; >=0 overrides physical radius (pixels)
     "deposit_cells_multiplier" : 1.0,  # multiplier converting dropped amount to deposited-map cells (unitless)
     "deposit_merge_distance" : 0.03,  # legacy merge-distance knob for deposited spots (cm)
@@ -61,10 +61,11 @@ config_opts = {
     "gut_drop_enabled" : 1,  # enable gut-drop pathway (0/1)
     "gut_drop_trigger_cells" : 35.0,  # gut reservoir threshold needed to trigger one drop event (cells)
     "gut_drop_conversion_fraction" : 1.0,  # fraction of trigger amount converted to deposited amount (unitless)
-    "gut_drop_delay_steps" : 5000,  # delay from intake to gut availability for dropping (timesteps)
+    "gut_drop_delay_steps" : 0,  # delay from intake to gut availability for dropping (timesteps)
     "gut_drop_jitter_radius" : 0.05,  # random spatial offset radius for gut-drop location (cm)
     "gut_drop_max_events_per_step" : 5,  # maximum gut-drop events processed in one timestep (events/step)
-    "single_deposit_per_worm" : 1,  # one-time deposition mode: each worm can create at most one deposited patch (0/1)
+    "single_deposit_per_worm" : 0,  # legacy one-time deposition toggle (0/1); keep 0 when using max_deposits_per_worm
+    "max_deposits_per_worm" : 10,  # cap on total gut-drop deposit events per worm; 0 means unlimited
 
     # Legacy (kept for compatibility)
     # "bacteria_enabled" : False,

@@ -66,7 +66,11 @@ class Worm(object):
         self.gut_drop_max_events_per_step = max(int(getattr(self, "gut_drop_max_events_per_step", 5)), 1)
         self._gut_drop_release_queue = deque()
         self.single_deposit_per_worm = bool(getattr(self, "single_deposit_per_worm", True))
-        self.has_deposited_once = False
+        if self.single_deposit_per_worm:
+            self.max_deposits_per_worm = 1
+        else:
+            self.max_deposits_per_worm = max(int(getattr(self, "max_deposits_per_worm", 0)), 0)
+        self.num_deposits_done = 0
     
     # ------------------------------------------------------------------
     # Initialisation
@@ -252,7 +256,8 @@ class Worm(object):
                 pickup = self.surface_pickup_rate * dt
                 self.surface_cells_carried = min(self.surface_cells_carried + pickup, self.surface_carry_capacity)
 
-            if self.gut_drop_enabled and self.deposition_fraction > 0.0 and (not self.has_deposited_once):
+            deposits_remaining = (self.max_deposits_per_worm == 0) or (self.num_deposits_done < self.max_deposits_per_worm)
+            if self.gut_drop_enabled and self.deposition_fraction > 0.0 and deposits_remaining:
                 delayed_cells = self.deposition_fraction * dB_worm
                 release_step = self.timestep + self.gut_drop_delay_steps
                 self._gut_drop_release_queue.append((release_step, delayed_cells))
@@ -303,21 +308,7 @@ class Worm(object):
         if not self.deposition_enabled:
             return
 
-        if self.single_deposit_per_worm:
-            if self.has_deposited_once or not self.gut_drop_enabled:
-                return
-
-            if self.gut_cells_for_drop < self.gut_drop_trigger_cells:
-                return
-
-            # One-time drop: convert currently available gut reservoir into one deposited source patch.
-            amount = self.gut_cells_for_drop * self.gut_drop_conversion_fraction
-            dropped = self.__deposit_with_jitter(environment, amount, self.gut_drop_jitter_radius)
-            if dropped > 0.0:
-                self.gut_cells_for_drop = 0.0
-                self.gut_drop_step += dropped
-                self.gut_drop_total += dropped
-                self.has_deposited_once = True
+        if self.max_deposits_per_worm > 0 and self.num_deposits_done >= self.max_deposits_per_worm:
             return
 
         # 1) Surface shedding at random intervals
@@ -346,9 +337,13 @@ class Worm(object):
 
         events = 0
         while self.gut_cells_for_drop >= self.gut_drop_trigger_cells and events < self.gut_drop_max_events_per_step:
+            if self.max_deposits_per_worm > 0 and self.num_deposits_done >= self.max_deposits_per_worm:
+                break
             self.gut_cells_for_drop -= self.gut_drop_trigger_cells
             amount = self.gut_drop_trigger_cells * self.gut_drop_conversion_fraction
             dropped = self.__deposit_with_jitter(environment, amount, self.gut_drop_jitter_radius)
             self.gut_drop_step += dropped
             self.gut_drop_total += dropped
+            if dropped > 0.0:
+                self.num_deposits_done += 1
             events += 1

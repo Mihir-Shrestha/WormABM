@@ -81,25 +81,100 @@ def load_worm_data(exp_dir):
     return worms
 
 
-def load_bacteria_frame(exp_dir, frame_idx=-1):
-    """Load a single bacteria grid frame from HDF5."""
+def load_bacteria_frame(exp_dir, frame_idx=-1, target_step=None):
+    """
+    Load one bacteria grid frame from HDF5.
+
+    If target_step is provided and the environment file stores a time/step vector,
+    pick the closest available recorded frame at or after that step.
+    """
     env_path = os.path.join(exp_dir, "environment_hist.h5")
     with h5py.File(env_path, "r") as f:
-        bacteria = np.array(f["bacteria"][frame_idx])
+        bacteria_ds = f["bacteria"]
+        n_frames = bacteria_ds.shape[0]
+        if n_frames == 0:
+            raise ValueError("No bacteria frames found in environment_hist.h5")
+
+        if target_step is not None and "t" in f:
+            env_t = np.asarray(f["t"][:], dtype=float)
+            idx = int(np.searchsorted(env_t, float(target_step), side="left"))
+            idx = min(max(idx, 0), n_frames - 1)
+        else:
+            if frame_idx < 0:
+                idx = n_frames + frame_idx
+            else:
+                idx = frame_idx
+            idx = min(max(int(idx), 0), n_frames - 1)
+
+        bacteria = np.array(bacteria_ds[idx])
     return bacteria
 
 
+def _connected_component(mask, start_row, start_col):
+    """Return boolean mask of the 4-neighbour component containing the start cell."""
+    h, w = mask.shape
+    comp = np.zeros_like(mask, dtype=bool)
+    if not (0 <= start_row < h and 0 <= start_col < w):
+        return comp
+    if not mask[start_row, start_col]:
+        return comp
+
+    stack = [(start_row, start_col)]
+    comp[start_row, start_col] = True
+    while stack:
+        r, c = stack.pop()
+        if r > 0 and mask[r - 1, c] and not comp[r - 1, c]:
+            comp[r - 1, c] = True
+            stack.append((r - 1, c))
+        if r + 1 < h and mask[r + 1, c] and not comp[r + 1, c]:
+            comp[r + 1, c] = True
+            stack.append((r + 1, c))
+        if c > 0 and mask[r, c - 1] and not comp[r, c - 1]:
+            comp[r, c - 1] = True
+            stack.append((r, c - 1))
+        if c + 1 < w and mask[r, c + 1] and not comp[r, c + 1]:
+            comp[r, c + 1] = True
+            stack.append((r, c + 1))
+
+    return comp
+
+
 def get_final_patch_radius(exp_dir):
-    """Compute final patch radius in cm from last bacteria frame."""
+    """
+    Estimate final main-patch radius in cm from the last bacteria frame.
+
+    Uses a center-connected component above a threshold tied to rho_0,
+    so sparse deposited micro-patches far away do not inflate the radius.
+    """
     bacteria = load_bacteria_frame(exp_dir, frame_idx=-1)
-    nonzero  = np.argwhere(bacteria > 0)
-    if len(nonzero) == 0:
-        return 0.5
     cfg    = read_config(exp_dir)
     dx     = float(cfg.get("dx", 0.01))
-    centre = bacteria.shape[0] / 2
-    dists  = np.sqrt(((nonzero[:, 0] - centre) * dx)**2 +
-                     ((nonzero[:, 1] - centre) * dx)**2)
+    rho_0  = float(cfg.get("rho_0", 1.27e6))
+    threshold = max(1e-12, 0.05 * rho_0)
+
+    mask = bacteria >= threshold
+    if not np.any(mask):
+        mask = bacteria > 0.0
+    if not np.any(mask):
+        return 0.5
+
+    h, w = mask.shape
+    c_row = int(round((h - 1) / 2.0))
+    c_col = int(round((w - 1) / 2.0))
+
+    if mask[c_row, c_col]:
+        core = _connected_component(mask, c_row, c_col)
+    else:
+        coords = np.argwhere(mask)
+        d2 = (coords[:, 0] - c_row) ** 2 + (coords[:, 1] - c_col) ** 2
+        nearest = coords[int(np.argmin(d2))]
+        core = _connected_component(mask, int(nearest[0]), int(nearest[1]))
+
+    points = np.argwhere(core)
+    if len(points) == 0:
+        return 0.5
+
+    dists = np.sqrt(((points[:, 0] - c_row) * dx) ** 2 + ((points[:, 1] - c_col) * dx) ** 2)
     return float(np.max(dists))
 
 
@@ -175,15 +250,18 @@ def plot_single_worm_trail(exp_dir, worm_num=0, out_dir=None):
     if worm_num not in worms:
         raise ValueError(f"Worm {worm_num} not found. Available: {list(worms.keys())}")
 
+    cfg  = read_config(exp_dir)
+    dt_min = float(cfg.get("dt", 1.0))
+
     worm = worms[worm_num]
     x_mm = worm["x"] * 10
     y_mm = worm["y"] * 10
-    t    = worm["t"]
-    days = t.max() / 60 / 24
+    t_min = worm["t"] * dt_min
+    days = t_min.max() / 60 / 24
 
-    norm   = plt.Normalize(t.min(), t.max())
+    norm   = plt.Normalize(t_min.min(), t_min.max())
     cmap   = cm.rainbow
-    colors = cmap(norm(t))
+    colors = cmap(norm(t_min))
 
     fig, ax = plt.subplots(figsize=(8, 7))
     fig.subplots_adjust(right=0.72)
@@ -252,13 +330,13 @@ def plot_multi_worm_trajectories(exp_dir, hours=4, out_dir=None):
     out_dir = out_dir or make_out_dir(exp_dir)
 
     dt_min  = float(cfg.get("dt",    1.0))
-    steps   = int((hours * 60) / dt_min)
+    target_step = int((hours * 60) / max(dt_min, 1e-12))
     x_min   = float(cfg.get("x_min", -1.5))
     x_max   = float(cfg.get("x_max",  1.5))
     K_rho   = float(cfg.get("K_rho",  4.58e8))
     rho_0   = float(cfg.get("rho_0",  1.27e8))
 
-    bacteria    = load_bacteria_frame(exp_dir, frame_idx=min(steps - 1, -1))
+    bacteria    = load_bacteria_frame(exp_dir, target_step=target_step)
     num_worms   = len(worms)
     worm_colors = cm.tab10(np.linspace(0, 1, max(num_worms, 1)))
 
@@ -287,9 +365,16 @@ def plot_multi_worm_trajectories(exp_dir, hours=4, out_dir=None):
     worm_legend_handles = []
 
     for worm_num, worm in worms.items():
-        x_cm = worm["x"][:steps]
-        y_cm = worm["y"][:steps]
-        t_w  = worm["t"][:steps]
+        t_w_min = worm["t"] * dt_min
+        keep = t_w_min <= (hours * 60.0)
+        if not np.any(keep):
+            continue
+
+        x_cm = worm["x"][keep]
+        y_cm = worm["y"][keep]
+        t_w  = t_w_min[keep]
+        if len(x_cm) == 0:
+            continue
         color = worm_colors[int(worm_num) % len(worm_colors)]
 
         # --- trajectory ---
@@ -314,8 +399,9 @@ def plot_multi_worm_trajectories(exp_dir, hours=4, out_dir=None):
         all_end_to_end.extend(end_to_end.tolist())
 
         # --- MSD per worm ---
-        lag_times, msd = compute_msd(x_cm, y_cm, t_w, max_lag_fraction=0.5)
-        all_msd_arrays.append((lag_times, msd, color, worm_num))
+        if len(x_cm) > 2:
+            lag_times, msd = compute_msd(x_cm, y_cm, t_w, max_lag_fraction=0.5)
+            all_msd_arrays.append((lag_times, msd, color, worm_num))
 
     # Marker legend entries
     marker_handles = [
@@ -372,30 +458,31 @@ def plot_multi_worm_trajectories(exp_dir, hours=4, out_dir=None):
 
     # Ensemble mean MSD across all worms
     # Interpolate all to the common shortest lag_time array
-    min_len    = min(len(lt) for lt, _, _, _ in all_msd_arrays)
-    ref_lags   = all_msd_arrays[0][0][:min_len]
-    msd_stack  = np.array([msd[:min_len] for _, msd, _, _ in all_msd_arrays])
-    mean_msd   = np.mean(msd_stack, axis=0)
+    if all_msd_arrays:
+        min_len    = min(len(lt) for lt, _, _, _ in all_msd_arrays)
+        ref_lags   = all_msd_arrays[0][0][:min_len]
+        msd_stack  = np.array([msd[:min_len] for _, msd, _, _ in all_msd_arrays])
+        mean_msd   = np.mean(msd_stack, axis=0)
 
-    ax_msd.loglog(ref_lags, mean_msd,
-                  color='black', linewidth=2.5,
-                  label='Ensemble mean', zorder=5)
+        ax_msd.loglog(ref_lags, mean_msd,
+                      color='black', linewidth=2.5,
+                      label='Ensemble mean', zorder=5)
 
-    # Reference slope lines anchored near the mean MSD
-    # Find a good anchor point (10% into the lag range)
-    anchor_idx  = max(1, min_len // 10)
-    anchor_lag  = ref_lags[anchor_idx]
-    anchor_msd  = mean_msd[anchor_idx]
+        anchor_idx  = max(1, min_len // 10)
+        anchor_lag  = ref_lags[anchor_idx]
+        anchor_msd  = mean_msd[anchor_idx]
 
-    lags_ref    = np.array([ref_lags[0], ref_lags[-1]])
+        lags_ref    = np.array([ref_lags[0], ref_lags[-1]])
+        slope1 = anchor_msd * (lags_ref / anchor_lag) ** 1
+        slope2 = anchor_msd * (lags_ref / anchor_lag) ** 2
 
-    slope1 = anchor_msd * (lags_ref / anchor_lag) ** 1   # diffusive
-    slope2 = anchor_msd * (lags_ref / anchor_lag) ** 2   # ballistic
-
-    ax_msd.loglog(lags_ref, slope1, 'k--', linewidth=1.2,
-                  label='slope = 1 (diffusive)')
-    ax_msd.loglog(lags_ref, slope2, 'k:',  linewidth=1.2,
-                  label='slope = 2 (ballistic)')
+        ax_msd.loglog(lags_ref, slope1, 'k--', linewidth=1.2,
+                      label='slope = 1 (diffusive)')
+        ax_msd.loglog(lags_ref, slope2, 'k:',  linewidth=1.2,
+                      label='slope = 2 (ballistic)')
+    else:
+        ax_msd.text(0.5, 0.5, "MSD unavailable for selected window",
+                    transform=ax_msd.transAxes, ha='center', va='center', fontsize=10)
 
     ax_msd.set_xlabel("Time lag (min)",          fontsize=12)
     ax_msd.set_ylabel("MSD (mm²)",               fontsize=12)
@@ -407,14 +494,17 @@ def plot_multi_worm_trajectories(exp_dir, hours=4, out_dir=None):
                linewidth=1.0, alpha=0.6, label=f"Worm {wn}")
         for _, _, _, wn in all_msd_arrays
     ]
-    msd_ref_handles = [
-        Line2D([0], [0], color='black', linewidth=2.5,
-               label='Ensemble mean'),
-        Line2D([0], [0], color='black', linewidth=1.2,
-               linestyle='--', label='slope = 1 (diffusive)'),
-        Line2D([0], [0], color='black', linewidth=1.2,
-               linestyle=':',  label='slope = 2 (ballistic)'),
-    ]
+    if all_msd_arrays:
+        msd_ref_handles = [
+            Line2D([0], [0], color='black', linewidth=2.5,
+                   label='Ensemble mean'),
+            Line2D([0], [0], color='black', linewidth=1.2,
+                   linestyle='--', label='slope = 1 (diffusive)'),
+            Line2D([0], [0], color='black', linewidth=1.2,
+                   linestyle=':',  label='slope = 2 (ballistic)'),
+        ]
+    else:
+        msd_ref_handles = []
 
     ax_msd.legend(
         handles=msd_worm_handles + msd_ref_handles,

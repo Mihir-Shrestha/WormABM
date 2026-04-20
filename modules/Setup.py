@@ -89,6 +89,7 @@ def config_options():
     parser.add_argument("--gut_drop_jitter_radius", type=float, default=0.05)
     parser.add_argument("--gut_drop_max_events_per_step", type=int, default=5)
     parser.add_argument("--single_deposit_per_worm", type=int, default=1)
+    parser.add_argument("--max_deposits_per_worm", type=int, default=0)
 
     # Config file
     parser.add_argument("--file", type=open, action=LoadFromFile)
@@ -206,6 +207,7 @@ def world_parameters(cfg, model_dir):
         "gut_drop_jitter_radius": cfg.gut_drop_jitter_radius,
         "gut_drop_max_events_per_step": cfg.gut_drop_max_events_per_step,
         "single_deposit_per_worm": bool(cfg.single_deposit_per_worm),
+        "max_deposits_per_worm": cfg.max_deposits_per_worm,
     }
 
     world_params = {
