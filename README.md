@@ -1,9 +1,9 @@
-# C. elegans Agent-Based Model (Main Branch)
+# C. elegans Agent-Based Model (Method2 Branch)
 
 ## Overview
-This branch contains the baseline model with bacteria diffusion and logistic
-growth solved using Fourier-space Strang splitting. Worms follow a
-run-and-tumble style motion on a 2D grid with a single initial bacteria patch.
+This branch models feeding and deposition using multiple bacterial patches.
+Patch area and density follow coupled logistic ODEs, and feeding depends on
+total patch area, density, and the effective number of worms on patch.
 
 ## Requirements
 - Python 3.x
@@ -29,10 +29,19 @@ Results are saved under experiments/ with:
 - time-series data (.h5)
 
 ## Model Notes
-- Diffusion and growth are updated with exact Fourier steps and analytic
-	logistic growth (Strang splitting) in modules/Environment.py.
-- Initial bacteria patch is centered at the origin.
-- The parameter sweep is driven by config/config_src.py.
+- Multiple bacteria patches evolve by logistic ODEs for area and density
+	(modules/Environment.py). The grid map is built from all active patches.
+- Feeding uses global patch properties plus the effective number of worms on
+	patch, and depletion is applied across patches.
+- Worms follow an SDE motility model with density-dependent speed and noise.
+- Key parameters and sweeps live in config/config_src.py.
+
+## Diagnostics
+Optional checks and plots:
+```bash
+python verify_worm_feeding.py
+python plot_feeding_diagnostics.py
+```
 
 ## Movie Generation
 Create a visualization after running a simulation:
