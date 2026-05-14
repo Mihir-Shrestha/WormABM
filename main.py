@@ -23,7 +23,7 @@ def main(cfg_options, environment, worms, keeper):
                 if record_now:
                     keeper.measure_worms(worm, global_i)
 
-            # Apply growth and depletion using the summed per-worm feeding
+            # Update environment state (static sources + deposited trail bookkeeping)
             environment.update_bacteria_map()
 
             # Store environment info after all worms have moved

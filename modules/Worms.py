@@ -1,32 +1,32 @@
 import numpy as np
-from collections import deque
 
 class Worm(object):
     """
-    Single worm using continuous SDE motility (Euler-Maruyama):
+    Single worm with random walk + source-dependent dwelling.
 
+    Motion uses chemotactic turning with a stochastic term:
         dtheta = chi_theta * (u_perp . grad_b_norm) * dt
-                 + sqrt(2 * D(b_norm)) * dW
+                 + sqrt(2 * D_eff * dt) * N(0,1)
+        dx     = v(b_norm) * u(theta_new) * dt
 
-        dx     = v(b_norm) * u * dt
-
-    where b_norm = b / K_rho is the bacterial density normalised to [0, 1],
-    so that alpha, beta_b, chi_theta are dimensionless and scale-independent.
-
-    Speed and noise are suppressed at high b (dwelling behaviour):
-        v(b_norm)  = v_min + (v_max - v_min) * exp(-alpha  * b_norm)
-        D(b_norm)  = D_theta * exp(-beta_b * b_norm)
+    A worm becomes "fed" once it visits one of the two initial bacteria sources.
+    After a fixed delay, fed worms deposit forever at a fixed interval.
     """
 
     def __init__(self, params):
         self.__set_params(params)
         self.__init_position()
         self.on_patch = False       
+        self.on_source = False
+        self.fed = False
+        self.first_fed_timestep = -1
+        self.next_deposit_timestep = None
+
         self.cells_eaten_step = 0.0
         self.cells_eaten_total = 0.0
         self.cells_available_to_deposit = 0.0
 
-        # Deposition state
+        # Legacy deposition diagnostics (kept so existing logging continues to work).
         self.surface_cells_carried = 0.0
         self.gut_cells_for_drop = 0.0
         self.surface_drop_step = 0.0
@@ -42,35 +42,23 @@ class Worm(object):
         )
         self.deposition_fraction = max(float(getattr(self, "deposition_fraction", 1.0)), 0.0)
 
-        # Surface shedding pathway (random intervals)
-        self.surface_shedding_enabled = bool(getattr(self, "surface_shedding_enabled", True))
-        self.surface_pickup_rate = max(float(getattr(self, "surface_pickup_rate", 2.0)), 0.0)  # cells/min
-        self.surface_carry_capacity = max(float(getattr(self, "surface_carry_capacity", 40.0)), 0.0)
-        default_interval = int(getattr(self, "deposition_interval_steps", getattr(self, "bacteria_drop_interval", 5)))
-        self.surface_shed_mean_steps = max(int(getattr(self, "surface_shed_mean_steps", default_interval)), 1)
-        self.surface_shed_fraction_min = float(getattr(self, "surface_shed_fraction_min", 0.02))
-        self.surface_shed_fraction_max = float(getattr(self, "surface_shed_fraction_max", 0.15))
-        if self.surface_shed_fraction_max < self.surface_shed_fraction_min:
-            self.surface_shed_fraction_min, self.surface_shed_fraction_max = self.surface_shed_fraction_max, self.surface_shed_fraction_min
-        default_surface_cap = float(getattr(self, "deposition_max_per_event", getattr(self, "bacteria_amount", 0.0)))
-        self.surface_shed_max_cells = float(getattr(self, "surface_shed_max_cells", default_surface_cap))
-        self.surface_drop_jitter_radius = max(float(getattr(self, "surface_drop_jitter_radius", 0.08)), 0.0)
-        self.next_surface_shed_timestep = self.__sample_surface_shed_interval()
-
-        # Drop pathway (triggered by eaten amount)
-        self.gut_drop_enabled = bool(getattr(self, "gut_drop_enabled", True))
-        self.gut_drop_trigger_cells = max(float(getattr(self, "gut_drop_trigger_cells", 35.0)), 1e-9)
-        self.gut_drop_conversion_fraction = float(np.clip(getattr(self, "gut_drop_conversion_fraction", 0.25), 0.0, 1.0))
-        self.gut_drop_delay_steps = max(int(getattr(self, "gut_drop_delay_steps", 1000)), 0)
-        self.gut_drop_jitter_radius = max(float(getattr(self, "gut_drop_jitter_radius", 0.05)), 0.0)
-        self.gut_drop_max_events_per_step = max(int(getattr(self, "gut_drop_max_events_per_step", 5)), 1)
-        self._gut_drop_release_queue = deque()
-        self.single_deposit_per_worm = bool(getattr(self, "single_deposit_per_worm", True))
-        if self.single_deposit_per_worm:
-            self.max_deposits_per_worm = 1
-        else:
-            self.max_deposits_per_worm = max(int(getattr(self, "max_deposits_per_worm", 0)), 0)
-        self.num_deposits_done = 0
+        # Fed-state deposition parameters.
+        self.fed_deposit_delay_steps = max(
+            int(getattr(self, "fed_deposit_delay_steps", getattr(self, "gut_drop_delay_steps", 1000))),
+            0,
+        )
+        self.fed_deposit_interval_steps = max(
+            int(getattr(self, "fed_deposit_interval_steps", getattr(self, "deposition_interval_steps", 100))),
+            1,
+        )
+        self.fed_deposit_amount = max(
+            float(getattr(self, "fed_deposit_amount", getattr(self, "gut_drop_trigger_cells", 35.0))),
+            0.0,
+        )
+        self.fed_deposit_jitter_radius = max(
+            float(getattr(self, "fed_deposit_jitter_radius", getattr(self, "gut_drop_jitter_radius", 0.05))),
+            0.0,
+        )
     
     # ------------------------------------------------------------------
     # Initialisation
@@ -120,11 +108,14 @@ class Worm(object):
         
         Returns
         -------
-        b_norm  : float  normalised density in [0, 1]  (b / K_rho)
-        grad_bn : (2,)   normalised gradient [d/dx, d/dy]
+        b_norm : float
+            Bacteria density normalised to [0, 1] using K_rho.
+        grad_bn : np.ndarray
+            Local bacteria gradient [d b_norm / dx, d b_norm / dy].
         """
-        bmap = environment.bacteria_map          # 2D array (row=y, col=x)
-        K    = environment.K_rho                 # carrying capacity for normalisation
+        bmap = environment.bacteria_map
+        norm_scale = max(environment.K_rho, 1e-12)
+        source_map = environment.source_map
 
         # Grid spacing in cm
         dx = environment.dx
@@ -140,18 +131,15 @@ class Worm(object):
 
         # Local and normalised density at worm position
         b_local = bmap[row, col]
-        if K > 0.0:
-            b_norm = b_local / K
-        else:
-            b_norm = 0.0
+        b_norm = float(np.clip(b_local / norm_scale, 0.0, 1.0))
+        grad_bn = np.array([
+            environment.grad_bn_x[row, col],
+            environment.grad_bn_y[row, col],
+        ])
 
-        # Gradient of normalised bacteria map, precomputed once per timestep
-        grad_bn_x = environment.grad_bn_x[row, col]  # d b_norm / dx
-        grad_bn_y = environment.grad_bn_y[row, col]  # d b_norm / dy
-
-        grad_bn = np.array([grad_bn_x, grad_bn_y])
-
-        # On-patch uses an absolute concentration check so low-density regimes still count as source.
+        # Only the initial sources can feed worms, but on_patch tracks any bacteria.
+        source_local = source_map[row, col]
+        self.on_source = environment.is_on_source(source_local)
         self.on_patch = environment.is_on_patch(b_local)
 
         return b_norm, grad_bn
@@ -167,7 +155,7 @@ class Worm(object):
 
         if dist > R:
             # --- reflect position ---
-            # normal at boundary point (pointing inward)
+            # outward normal at boundary point
             nx = new_x / dist
             ny = new_y / dist
 
@@ -181,20 +169,16 @@ class Worm(object):
                 new_x = new_x * (R / dist2)
                 new_y = new_y * (R / dist2)
 
-            # --- reflect heading angle ---
-            # reflect theta off the inward normal
-            # inward normal angle
-            normal_angle = np.arctan2(-ny, -nx)
-            # angle of current heading relative to normal
-            incident = self.theta - normal_angle
-            # reflected heading
-            self.theta = normal_angle - incident
+            # --- reflect heading by reflecting direction vector ---
+            # v_ref = v - 2 * (v · n) * n
+            vx = np.cos(self.theta)
+            vy = np.sin(self.theta)
+            dot_vn = vx * nx + vy * ny
+            vx_ref = vx - 2.0 * dot_vn * nx
+            vy_ref = vy - 2.0 * dot_vn * ny
+            self.theta = np.arctan2(vy_ref, vx_ref)
 
         return new_x, new_y
-
-    def __sample_surface_shed_interval(self):
-        """Sample random shedding interval in timesteps (exponential waiting time)."""
-        return max(1, int(np.random.exponential(self.surface_shed_mean_steps)))
 
     def __deposit_with_jitter(self, environment, amount, jitter_radius):
         """Deposit amount near current location with small random spatial jitter."""
@@ -213,11 +197,22 @@ class Worm(object):
         environment.add_bacteria_source(x_drop, y_drop, amount)
         return amount
 
-    def __release_delayed_gut_cells(self):
-        """Move matured eaten cells into gut reservoir once their delay has elapsed."""
-        while self._gut_drop_release_queue and self._gut_drop_release_queue[0][0] <= self.timestep:
-            _, amount = self._gut_drop_release_queue.popleft()
-            self.gut_cells_for_drop += amount
+    def __deposit_if_ready(self, environment):
+        """After fed-state delay, deposit forever at fixed intervals."""
+        if not self.deposition_enabled or (not self.fed) or self.fed_deposit_amount <= 0.0:
+            return
+
+        if self.next_deposit_timestep is None or self.timestep < self.next_deposit_timestep:
+            return
+
+        # Catch up if a long delay created multiple due events.
+        due_events = 1 + (self.timestep - self.next_deposit_timestep) // self.fed_deposit_interval_steps
+        for _ in range(int(due_events)):
+            dropped = self.__deposit_with_jitter(environment, self.fed_deposit_amount, self.fed_deposit_jitter_radius)
+            self.gut_drop_step += dropped
+            self.gut_drop_total += dropped
+
+        self.next_deposit_timestep += int(due_events) * self.fed_deposit_interval_steps
 
     
     # ------------------------------------------------------------------
@@ -234,53 +229,35 @@ class Worm(object):
         """
         dt = environment.dt
 
-        # --- sample local field ---
+        # --- sample local bacteria field ---
         b_norm, grad_bn = self.__get_bacteria_and_gradient(environment)
         self.surface_drop_step = 0.0
         self.gut_drop_step = 0.0
 
-        # --- local intake used for deposition bookkeeping
-        # Global environment depletion is handled by the paper-style term in Environment.
-        # Intensity is constant per feeding worm (paper a term), gated only by on_patch.
-        rate_per_worm = max(float(getattr(self, "feeding_cells_per_worm", 70.0)), 0.0)
-        if self.on_patch:
-            dB_worm = rate_per_worm * dt
-        else:
-            dB_worm = 0.0
-        self.cells_eaten_step = dB_worm
-        self.cells_eaten_total += dB_worm
-        environment.register_feeding_worm(self.on_patch)
+        # "Feeding" is a state flag: once worm reaches either source it remains fed forever.
+        if self.on_source and (not self.fed):
+            self.fed = True
+            self.first_fed_timestep = self.timestep
+            self.next_deposit_timestep = self.timestep + self.fed_deposit_delay_steps
 
-        if self.deposition_enabled:
-            if (not self.single_deposit_per_worm) and self.surface_shedding_enabled and self.on_patch:
-                pickup = self.surface_pickup_rate * dt
-                self.surface_cells_carried = min(self.surface_cells_carried + pickup, self.surface_carry_capacity)
-
-            deposits_remaining = (self.max_deposits_per_worm == 0) or (self.num_deposits_done < self.max_deposits_per_worm)
-            if self.gut_drop_enabled and self.deposition_fraction > 0.0 and deposits_remaining:
-                delayed_cells = self.deposition_fraction * dB_worm
-                release_step = self.timestep + self.gut_drop_delay_steps
-                self._gut_drop_release_queue.append((release_step, delayed_cells))
+        self.cells_eaten_step = 1.0 if self.on_source else 0.0
+        self.cells_eaten_total += self.cells_eaten_step
 
         # --- diagnostic suppression inside patch ---
         suppress = getattr(self, "suppress_patch_chemotaxis", False)
         on_patch = self.on_patch
 
         if suppress and on_patch:
-            # Force pure random walk: no gradient bias, no speed/noise suppression
-            b_norm  = 0.0               # v -> v_max, D_eff -> D_theta
-            grad_bn = np.zeros(2)       # no chemotactic turning
+            # Suppress source-dependent modulation inside source patch if requested.
+            b_norm  = 0.0
+            grad_bn = np.zeros(2)
 
-        # --- unit vectors from current angle ---
+        # --- chemotactic turning with stochastic term ---
         u, u_perp = self.__unit_vectors(self.theta)
-
-        # --- chemotactic turning (deterministic) ---
-        proj       = np.dot(u_perp, grad_bn)            # scalar
+        proj = np.dot(u_perp, grad_bn)
         dtheta_det = self.chi_theta * proj * dt
         D_theta = (self.dtheta ** 2) / (2.0 * environment.dt)
-
-        # --- angular noise suppressed by bacteria (stochastic) ---
-        D_eff        = D_theta * np.exp(-self.beta_b * b_norm)
+        D_eff = D_theta * np.exp(-self.beta_b * b_norm)
         dtheta_noise = np.sqrt(2.0 * D_eff * dt) * np.random.normal()
 
         # --- update angle ---
@@ -297,53 +274,7 @@ class Worm(object):
         # --- boundary check ---
         self.x, self.y = self.__check_arena_boundary(environment, new_x, new_y)
 
-        # --- deposit after movement ---
-        self.__release_delayed_gut_cells()
-        self.__drop_bacteria(environment)
-        self.cells_available_to_deposit = self.surface_cells_carried + (self.gut_cells_for_drop * self.gut_drop_conversion_fraction)
+        # --- fed worms deposit forever after delay ---
+        self.__deposit_if_ready(environment)
+        self.cells_available_to_deposit = 1.0 if self.fed else 0.0
         self.timestep += 1
-
-    def __drop_bacteria(self, environment):
-        """Deposit via two pathways: random surface shedding and threshold-triggered drop."""
-        if not self.deposition_enabled:
-            return
-
-        if self.max_deposits_per_worm > 0 and self.num_deposits_done >= self.max_deposits_per_worm:
-            return
-
-        # 1) Surface shedding at random intervals
-        if self.surface_shedding_enabled and self.timestep >= self.next_surface_shed_timestep:
-            # Shedding occurs only outside patch; carrying can still be acquired on patch.
-            if (not self.on_patch) and self.surface_cells_carried > 0.0:
-                frac = np.random.uniform(self.surface_shed_fraction_min, self.surface_shed_fraction_max)
-                amount = self.surface_cells_carried * max(frac, 0.0)
-                if self.surface_shed_max_cells > 0.0:
-                    amount = min(amount, self.surface_shed_max_cells)
-
-                dropped = self.__deposit_with_jitter(environment, amount, self.surface_drop_jitter_radius)
-                self.surface_cells_carried = max(self.surface_cells_carried - dropped, 0.0)
-                self.surface_drop_step += dropped
-                self.surface_drop_total += dropped
-
-                self.next_surface_shed_timestep += self.__sample_surface_shed_interval()
-
-        # 2) Gut-drop events after consuming threshold amount
-        if not self.gut_drop_enabled:
-            return
-
-        # Gut-drop deposition is allowed only outside the patch.
-        if self.on_patch:
-            return
-
-        events = 0
-        while self.gut_cells_for_drop >= self.gut_drop_trigger_cells and events < self.gut_drop_max_events_per_step:
-            if self.max_deposits_per_worm > 0 and self.num_deposits_done >= self.max_deposits_per_worm:
-                break
-            self.gut_cells_for_drop -= self.gut_drop_trigger_cells
-            amount = self.gut_drop_trigger_cells * self.gut_drop_conversion_fraction
-            dropped = self.__deposit_with_jitter(environment, amount, self.gut_drop_jitter_radius)
-            self.gut_drop_step += dropped
-            self.gut_drop_total += dropped
-            if dropped > 0.0:
-                self.num_deposits_done += 1
-            events += 1

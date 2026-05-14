@@ -81,7 +81,7 @@ def process_data(env_path, worm_path):
 
     return worms, bacteria_history
 
-def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_config, convert_xy_to_index, total_frames, show_gradient):  
+def plot_frame(frame_i, worms, bacteria_history, source_template, legend_colors, texts, script_config, convert_xy_to_index, total_frames, show_gradient):  
     """Plot a single frame of the simulation including worms and bacteria concentration"""
 
     # Fixed figure size — must be identical every frame so cv2 can stack them
@@ -140,6 +140,30 @@ def plot_frame(frame_i, worms, bacteria_history, legend_colors, texts, script_co
             clb.outline.set_edgecolor('white')
             clb.ax.tick_params(color='white', labelcolor='white')
             clb.ax.title.set_color('white')
+
+            # Draw deposits as small green circles from local peaks.
+            if source_template is not None and source_template.shape == bacteria_grid.shape:
+                deposit_grid = bacteria_grid - source_template
+                deposit_grid = np.where(deposit_grid > 0.0, deposit_grid, 0.0)
+                if np.any(deposit_grid > 0.0):
+                    draw_threshold = float(script_config.get('deposit_display_threshold', 10.0))
+                    deposit_grid = np.where(deposit_grid >= draw_threshold, deposit_grid, 0.0)
+                    if np.any(deposit_grid > 0.0):
+                        kernel = np.ones((3, 3), dtype=np.uint8)
+                        dilated = cv2.dilate(deposit_grid.astype(np.float32), kernel, iterations=1)
+                        peak_mask = (deposit_grid > 0.0) & (deposit_grid >= (dilated - 1e-12))
+                        rows, cols = np.where(peak_mask)
+                        if rows.size > 0:
+                            plt.scatter(
+                                cols,
+                                rows,
+                                marker='o',
+                                s=10,
+                                c='#00ff66',
+                                alpha=0.95,
+                                edgecolors='none',
+                                zorder=6,
+                            )
 
     # --- worms and trails ---
     num_worms  = len(worms)
@@ -240,6 +264,10 @@ def main(exp_path, fps, stepsize, show_gradient):
 
     # Obtain & process data
     worms, bacteria_sources = process_data(env_path, worm_path)
+    source_template = None
+    if len(bacteria_sources) > 0:
+        # Use frame 0 as baseline source map to avoid tiny subtraction artifacts near sources.
+        source_template = bacteria_sources[0].copy()
 
     # Setup for plotting
     total_frames = len(list(worms.values())[0]['x'])
@@ -254,13 +282,13 @@ def main(exp_path, fps, stepsize, show_gradient):
             sys.stdout.write(f"\rMaking frame {frame_i}/{total_frames-1}")
             sys.stdout.flush()
 
-            plot_frame(frame_i, worms, bacteria_sources, legend_colors, texts, script_config, convert_xy_to_index, total_frames, show_gradient)
+            plot_frame(frame_i, worms, bacteria_sources, source_template, legend_colors, texts, script_config, convert_xy_to_index, total_frames, show_gradient)
     
     # Last frame
     frame_i = total_frames - 1
     sys.stdout.write(f"\rMaking frame {frame_i}/{total_frames-1}")
     sys.stdout.flush()
-    plot_frame(frame_i, worms, bacteria_sources, legend_colors, texts, script_config, convert_xy_to_index, total_frames, show_gradient)
+    plot_frame(frame_i, worms, bacteria_sources, source_template, legend_colors, texts, script_config, convert_xy_to_index, total_frames, show_gradient)
 
     # Stitching frames together to create video
     all_img_paths = np.sort(glob2.glob(f"{MOVIE_FRAME_PATH}/*.png"))

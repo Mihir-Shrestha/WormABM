@@ -43,6 +43,13 @@ def config_options():
     parser.add_argument("--A_B_0", type=float)  # initial patch area = pi * 0.5^2 cm^2
     parser.add_argument("--rho_0", type=float)          # initial density (cells/cm^2)
     parser.add_argument("--boundary_k", type=float)      # Boundary sharpness (cm^-1). Large (e.g. 100) = sharp ring, small (e.g. 2) = wide sensing range
+    parser.add_argument("--source_density", type=float, default=1.0e8)
+    parser.add_argument("--source_x_offset", type=float, default=1.5)
+    parser.add_argument("--source_radius", type=float, default=0.2)
+    parser.add_argument("--source_boundary_k", type=float, default=0.0)
+    parser.add_argument("--spawn_radius", type=float, default=0.5)
+    parser.add_argument("--spawn_min_distance", type=float, default=0.2)
+    parser.add_argument("--spawn_source_clearance", type=float, default=0.05)
     parser.add_argument("--feed_c", type=float)          # Amplitude of Gaussian food source (cells/cm^2). 0 means no food source.
     parser.add_argument("--feed_sigma", type=float)      # Width of Gaussian food source (
     parser.add_argument("--feeding_cells_per_worm", type=float, default=70.0)
@@ -90,6 +97,10 @@ def config_options():
     parser.add_argument("--gut_drop_max_events_per_step", type=int, default=5)
     parser.add_argument("--single_deposit_per_worm", type=int, default=1)
     parser.add_argument("--max_deposits_per_worm", type=int, default=0)
+    parser.add_argument("--fed_deposit_delay_steps", type=int, default=1000)
+    parser.add_argument("--fed_deposit_interval_steps", type=int, default=300)
+    parser.add_argument("--fed_deposit_amount", type=float, default=35.0)
+    parser.add_argument("--fed_deposit_jitter_radius", type=float, default=0.05)
 
     # Config file
     parser.add_argument("--file", type=open, action=LoadFromFile)
@@ -159,6 +170,10 @@ def world_parameters(cfg, model_dir):
         "A_B_0": cfg.A_B_0,
         "rho_0": cfg.rho_0,
         "boundary_k": cfg.boundary_k,
+        "source_density": cfg.source_density,
+        "source_x_offset": cfg.source_x_offset,
+        "source_radius": cfg.source_radius,
+        "source_boundary_k": cfg.source_boundary_k,
         "num_worms": cfg.num_worms,
         "feed_c": cfg.feed_c,
         "feed_sigma": cfg.feed_sigma,
@@ -208,6 +223,10 @@ def world_parameters(cfg, model_dir):
         "gut_drop_max_events_per_step": cfg.gut_drop_max_events_per_step,
         "single_deposit_per_worm": bool(cfg.single_deposit_per_worm),
         "max_deposits_per_worm": cfg.max_deposits_per_worm,
+        "fed_deposit_delay_steps": cfg.fed_deposit_delay_steps,
+        "fed_deposit_interval_steps": cfg.fed_deposit_interval_steps,
+        "fed_deposit_amount": cfg.fed_deposit_amount,
+        "fed_deposit_jitter_radius": cfg.fed_deposit_jitter_radius,
     }
 
     world_params = {
@@ -223,24 +242,38 @@ def convert_index_to_xy(idx, idx_min, idx_max, xy_min, xy_max):
     xy = np.interp(idx, [idx_min, idx_max], [xy_min, xy_max])
     return xy
 
-def generate_points_with_min_distance(num_worms, R, min_dist):
+def generate_points_with_min_distance(num_worms, R, min_dist, spawn_radius, source_x_offset, source_radius, source_clearance):
     """
-    Generate initial worm positions uniformly inside circular arena of radius R,
-    with a minimum distance between worms.
-    Works in real (cm) coordinates directly — no index space needed.
+    Generate initial worm positions near origin, with minimum inter-worm spacing,
+    while excluding both source disks.
     """
     if num_worms <= 1:
         return np.array([[0.0, 0.0]])
 
     positions = []
-    max_attempts = 10000
+    spawn_radius = min(float(spawn_radius), float(R))
+    exclusion_radius = max(float(source_radius) + float(source_clearance), 0.0)
+
+    max_attempts = 200000
     attempts = 0
 
     while len(positions) < num_worms and attempts < max_attempts:
-        # uniform random point inside circle
-        x = np.random.uniform(-R, R)
-        y = np.random.uniform(-R, R)
+        # Uniform point in disk around origin
+        x = np.random.uniform(-spawn_radius, spawn_radius)
+        y = np.random.uniform(-spawn_radius, spawn_radius)
+        if x**2 + y**2 > spawn_radius**2:
+            attempts += 1
+            continue
+
+        # Also ensure inside arena
         if x**2 + y**2 >= R**2:
+            attempts += 1
+            continue
+
+        # Keep initial worms off the two source patches
+        d_left = np.sqrt((x + source_x_offset)**2 + y**2)
+        d_right = np.sqrt((x - source_x_offset)**2 + y**2)
+        if d_left <= exclusion_radius or d_right <= exclusion_radius:
             attempts += 1
             continue
 
@@ -257,8 +290,9 @@ def generate_points_with_min_distance(num_worms, R, min_dist):
 
     if len(positions) < num_worms:
         raise ValueError(
-            f"Could not place {num_worms} worms inside R={R} "
-            f"with min_dist={min_dist}. Try reducing min_dist."
+            f"Could not place {num_worms} worms near origin with spawn_radius={spawn_radius}, "
+            f"min_dist={min_dist}, source exclusion radius={exclusion_radius}. "
+            f"Try reducing min_dist or increasing spawn_radius."
         )
 
     return np.array(positions)
@@ -289,11 +323,15 @@ def world_objects(cfg_options, world_params):
     environment = Environment.Environment(world_params["environment"])
     keeper = Keeper.Keeper(world_params["keeper"])
 
-    # generate positions directly in cm, inside circle
+    # Generate positions around origin but away from both initial sources.
     coords = generate_points_with_min_distance(
         num_worms=cfg_options.num_worms,
         R=cfg_options.R,
-        min_dist=1.0       # minimum 1 cm between worms at start
+        min_dist=cfg_options.spawn_min_distance,
+        spawn_radius=cfg_options.spawn_radius,
+        source_x_offset=cfg_options.source_x_offset,
+        source_radius=cfg_options.source_radius,
+        source_clearance=cfg_options.spawn_source_clearance,
     )
 
     worms = create_worms(coords, cfg_options, world_params["worm"])
