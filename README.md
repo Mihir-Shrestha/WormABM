@@ -1,9 +1,9 @@
-# C. elegans Agent-Based Model (Method2 Branch)
+# C. elegans Agent-Based Model (Method3 Branch)
 
 ## Overview
-This branch models feeding and deposition using multiple bacterial patches.
-Patch area and density follow coupled logistic ODEs, and feeding depends on
-total patch area, density, and the effective number of worms on patch.
+This branch implements a simplified two-patch environment for behavioral
+experiments. The two sources are static, and deposited bacteria are non-growing
+trails that are not consumed or used for chemotaxis.
 
 ## Requirements
 - Python 3.x
@@ -29,19 +29,12 @@ Results are saved under experiments/ with:
 - time-series data (.h5)
 
 ## Model Notes
-- Multiple bacteria patches evolve by logistic ODEs for area and density
-	(modules/Environment.py). The grid map is built from all active patches.
-- Feeding uses global patch properties plus the effective number of worms on
-	patch, and depletion is applied across patches.
-- Worms follow an SDE motility model with density-dependent speed and noise.
-- Key parameters and sweeps live in config/config_src.py.
-
-## Diagnostics
-Optional checks and plots:
-```bash
-python verify_worm_feeding.py
-python plot_feeding_diagnostics.py
-```
+- Two fixed sources are placed at +/- source_x_offset with a hard or soft
+	boundary controlled by source_boundary_k.
+- Deposited bacteria are written to the map but do not grow, diffuse, or feed
+	worms; they are not used in chemotactic gradients.
+- Worms use a density-dependent SDE motility model with tuned speed/noise.
+- Key parameters live in config/config_src.py.
 
 ## Movie Generation
 Create a visualization after running a simulation:
