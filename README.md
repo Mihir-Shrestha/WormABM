@@ -28,37 +28,39 @@ Results are saved under experiments/ with:
 - the config file used for that run (.cfg)
 - time-series data (.h5)
 
-## Iterations and How to Access Them
-Use the branch that matches the model you want, or check out a specific commit
-from the linear history.
+## Iterations and How to Access Them (by commit)
+The history is linear. Check out a specific commit and create a local branch
+from it to run a given model.
 
 ### Method 1 (Baseline Fourier + Logistic Growth)
+Commit: f78908d
 - Fourier-space Strang splitting for diffusion with analytic logistic growth.
 - Single initial bacteria patch, baseline run-and-tumble style motion.
 
-Check out:
 ```bash
-git checkout main
-git log --oneline --decorate --graph
+git checkout f78908d
+git switch -c method1-local
 ```
 
 ### Method 2 (Patch ODEs + Feeding/Deposition)
+Commit: 8ff698b
 - Multiple bacteria patches with logistic ODEs for area and density.
 - Feeding depends on patch properties and effective worms on patch.
 - Includes diagnostics and feeding verification tools.
 
-Check out:
 ```bash
-git checkout method2
+git checkout 8ff698b
+git switch -c method2-local
 ```
 
 ### Method 3 (Simplified Two-Patch Model)
+Commit: 04c5945
 - Two static sources; deposited bacteria are non-growing and non-feeding.
 - Designed for behavior-focused experiments and clean comparisons.
 
-Check out:
 ```bash
-git checkout method3
+git checkout 04c5945
+git switch -c method3-local
 ```
 
 ## Diagnostics (Method 2 and later)
